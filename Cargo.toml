@@ -3,7 +3,7 @@ name = "cosmic-locale"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
-description = "An application to manage locale"
+description = "Native libcosmic GUI for managing system language, locale categories, and installed locales on Linux"
 repository = "https://github.com/rabol/cosmic-locale"
 
 [dev-dependencies]
