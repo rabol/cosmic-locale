@@ -336,20 +336,20 @@ pub async fn reset_lc_overrides() -> Result<(), LocaleError> {
     let conn = Connection::system()
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
-
     let proxy = Locale1Proxy::new(&conn)
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
+    reset_lc_overrides_with_proxy(&proxy).await
+}
 
+async fn reset_lc_overrides_with_proxy(proxy: &Locale1Proxy<'_>) -> Result<(), LocaleError> {
     let current = proxy.locale().await.map_err(|e| zbus_to_locale_error(&e))?;
     let new_locale = build_reset_locale(&current)?;
     let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
-
     proxy
         .set_locale(&new_locale_strs, true)
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
-
     Ok(())
 }
 
@@ -369,16 +369,21 @@ pub async fn set_category(category: &str, value: &str) -> Result<(), LocaleError
     let proxy = Locale1Proxy::new(&conn)
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
+    set_category_with_proxy(&proxy, category, value).await
+}
 
+async fn set_category_with_proxy(
+    proxy: &Locale1Proxy<'_>,
+    category: &str,
+    value: &str,
+) -> Result<(), LocaleError> {
     let current = proxy.locale().await.map_err(|e| zbus_to_locale_error(&e))?;
     let new_locale = build_category_set(&current, category, value);
     let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
-
     proxy
         .set_locale(&new_locale_strs, true)
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
-
     Ok(())
 }
 
@@ -401,21 +406,31 @@ pub async fn set_system_language(value: &str) -> Result<(), LocaleError> {
     let proxy = Locale1Proxy::new(&conn)
         .await
         .map_err(|e| zbus_to_locale_error(&e))?;
+    set_system_language_with_proxy(&proxy, value).await
+}
 
+async fn set_system_language_with_proxy(
+    proxy: &Locale1Proxy<'_>,
+    value: &str,
+) -> Result<(), LocaleError> {
+    let new_locale = build_system_language_locale(value);
+    let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
+    proxy
+        .set_locale(&new_locale_strs, true)
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+    Ok(())
+}
+
+/// Build the full `SetLocale` array for "set system language": `LANG`
+/// plus every `LC_*` pinned to the same value.
+fn build_system_language_locale(value: &str) -> Vec<String> {
     let mut new_locale = Vec::with_capacity(LC_CATEGORIES.len() + 1);
     new_locale.push(format!("LANG={value}"));
     for category in LC_CATEGORIES {
         new_locale.push(format!("{category}={value}"));
     }
-
-    let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
-
-    proxy
-        .set_locale(&new_locale_strs, true)
-        .await
-        .map_err(|e| zbus_to_locale_error(&e))?;
-
-    Ok(())
+    new_locale
 }
 
 /// Replace (or append) a single category in the locale array.
@@ -1295,5 +1310,200 @@ de_DE.UTF-8@euro
                 "LC_TIME=en_US.UTF-8".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn build_system_language_emits_lang_plus_every_lc() {
+        let result = build_system_language_locale("fr_FR.UTF-8");
+        assert_eq!(result.len(), LC_CATEGORIES.len() + 1);
+        assert_eq!(result[0], "LANG=fr_FR.UTF-8");
+        for (entry, expected_name) in result[1..].iter().zip(LC_CATEGORIES.iter()) {
+            assert_eq!(entry, &format!("{expected_name}=fr_FR.UTF-8"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod dbus_tests {
+    //! End-to-end tests for the D-Bus paths
+    //! ([`reset_lc_overrides`], [`set_category`],
+    //! [`set_system_language`]). Each test spins up a session-bus
+    //! connection that hosts a mock `org.freedesktop.locale1`
+    //! service and points a [`Locale1Proxy`] at the connection's
+    //! unique D-Bus name. Tests skip cleanly when no session bus is
+    //! reachable (so headless CI without a dbus-daemon doesn't
+    //! produce false failures).
+    //!
+    //! What we actually verify is the *shape* of the calls our code
+    //! makes — `SetLocale`'s argument array and the `interactive`
+    //! flag — not D-Bus marshalling itself, which is zbus's job.
+
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use zbus::interface;
+
+    #[derive(Default)]
+    struct MockState {
+        locale: Vec<String>,
+        set_locale_calls: Vec<(Vec<String>, bool)>,
+    }
+
+    struct MockLocale1 {
+        state: Arc<Mutex<MockState>>,
+    }
+
+    #[interface(name = "org.freedesktop.locale1")]
+    impl MockLocale1 {
+        #[zbus(property)]
+        async fn locale(&self) -> Vec<String> {
+            self.state.lock().unwrap().locale.clone()
+        }
+
+        async fn set_locale(&self, locale: Vec<String>, interactive: bool) {
+            let mut state = self.state.lock().unwrap();
+            state.set_locale_calls.push((locale.clone(), interactive));
+            state.locale = locale;
+        }
+    }
+
+    /// Spin up a session-bus connection serving a mock
+    /// `org.freedesktop.locale1` interface at the standard path.
+    /// Returns `None` if no session bus is reachable.
+    async fn setup_mock(
+        initial_locale: Vec<String>,
+    ) -> Option<(zbus::Connection, Arc<Mutex<MockState>>)> {
+        if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            return None;
+        }
+        let state = Arc::new(Mutex::new(MockState {
+            locale: initial_locale,
+            set_locale_calls: Vec::new(),
+        }));
+        let mock = MockLocale1 {
+            state: state.clone(),
+        };
+        let conn = zbus::connection::Builder::session()
+            .ok()?
+            .serve_at("/org/freedesktop/locale1", mock)
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        Some((conn, state))
+    }
+
+    /// Build a proxy that targets the mock service via the
+    /// connection's unique `:1.X` name, so tests can run in
+    /// parallel without fighting over the well-known
+    /// `org.freedesktop.locale1` name.
+    async fn proxy_for(conn: &zbus::Connection) -> Locale1Proxy<'_> {
+        let unique = conn.unique_name().expect("unique name").to_string();
+        Locale1Proxy::builder(conn)
+            .destination(unique)
+            .expect("set destination")
+            .build()
+            .await
+            .expect("build proxy")
+    }
+
+    fn assert_skipped_or<T>(opt: Option<T>) -> T {
+        opt.unwrap_or_else(|| {
+            panic!(
+                "test setup returned None; this should only happen when \
+                 DBUS_SESSION_BUS_ADDRESS is unset — re-run from a graphical session \
+                 or with a dbus-daemon, or invoke `cargo test` from one"
+            )
+        })
+    }
+
+    #[tokio::test]
+    async fn reset_overrides_pins_each_lc_to_lang_value() {
+        let Some((conn, state)) = setup_mock(vec![
+            "LANG=en_US.UTF-8".to_string(),
+            "LC_TIME=da_DK.utf8".to_string(),
+            "LC_NUMERIC=de_DE.utf8".to_string(),
+        ])
+        .await
+        else {
+            eprintln!("skipping reset_overrides_pins_each_lc_to_lang_value: no session bus");
+            return;
+        };
+
+        let proxy = proxy_for(&conn).await;
+        reset_lc_overrides_with_proxy(&proxy).await.unwrap();
+
+        let calls = state.lock().unwrap().set_locale_calls.clone();
+        assert_eq!(calls.len(), 1, "expected exactly one SetLocale call");
+        let (sent, interactive) = &calls[0];
+        assert!(*interactive, "must request interactive polkit");
+        assert!(
+            sent.iter().any(|s| s == "LANG=en_US.UTF-8"),
+            "LANG must be preserved: {sent:?}"
+        );
+        assert!(
+            sent.iter().any(|s| s == "LC_TIME=en_US.UTF-8"),
+            "LC_TIME must be pinned to LANG: {sent:?}"
+        );
+        assert!(
+            sent.iter().any(|s| s == "LC_NUMERIC=en_US.UTF-8"),
+            "LC_NUMERIC must be pinned to LANG: {sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_category_replaces_only_one_entry() {
+        let Some((conn, state)) = setup_mock(vec![
+            "LANG=en_US.UTF-8".to_string(),
+            "LC_TIME=da_DK.utf8".to_string(),
+            "LC_NUMERIC=de_DE.utf8".to_string(),
+        ])
+        .await
+        else {
+            eprintln!("skipping set_category_replaces_only_one_entry: no session bus");
+            return;
+        };
+
+        let proxy = proxy_for(&conn).await;
+        set_category_with_proxy(&proxy, "LC_TIME", "fr_FR.UTF-8")
+            .await
+            .unwrap();
+
+        let calls = state.lock().unwrap().set_locale_calls.clone();
+        assert_eq!(calls.len(), 1);
+        let (sent, _) = &calls[0];
+        assert!(sent.iter().any(|s| s == "LANG=en_US.UTF-8"));
+        assert!(sent.iter().any(|s| s == "LC_TIME=fr_FR.UTF-8"));
+        assert!(sent.iter().any(|s| s == "LC_NUMERIC=de_DE.utf8"));
+        assert!(
+            !sent.iter().any(|s| s == "LC_TIME=da_DK.utf8"),
+            "old LC_TIME value must be replaced"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_system_language_writes_lang_and_every_lc() {
+        let Some((conn, state)) = setup_mock(vec![
+            "LANG=en_US.UTF-8".to_string(),
+            "LC_TIME=da_DK.utf8".to_string(),
+        ])
+        .await
+        else {
+            eprintln!("skipping set_system_language_writes_lang_and_every_lc: no session bus");
+            return;
+        };
+
+        let proxy = proxy_for(&conn).await;
+        set_system_language_with_proxy(&proxy, "es_ES.UTF-8")
+            .await
+            .unwrap();
+
+        let calls = state.lock().unwrap().set_locale_calls.clone();
+        assert_eq!(calls.len(), 1);
+        let (sent, _) = &calls[0];
+        assert_eq!(sent.len(), LC_CATEGORIES.len() + 1);
+        assert!(sent.iter().all(|s| s.ends_with("=es_ES.UTF-8")));
+        // Sanity: keep the assert_skipped_or helper visible to clippy
+        // even though we use Option::unwrap above.
+        let _ = assert_skipped_or::<()>;
     }
 }

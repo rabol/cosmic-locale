@@ -6,6 +6,9 @@ license = "GPL-3.0-only"
 description = "An application to manage locale"
 repository = "https://github.com/rabol/cosmic-locale"
 
+[dev-dependencies]
+tempfile = "3"
+
 [dependencies]
 i18n-embed = { version = "0.16", features = [
     "fluent-system",

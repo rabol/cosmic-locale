@@ -8,14 +8,21 @@
 # org.freedesktop.policykit.exec.path annotation in
 # /usr/share/polkit-1/actions/dev.rabol.cosmic-locale.policy, so this
 # helper does not need to declare the action itself.
+#
+# The target path can be overridden via $LOCALE_GEN_PATH so the
+# integration test in tests/apply_locale_gen.rs can point it at a
+# tempfile. pkexec strips environment variables in production, so
+# the override is harmless there — the default applies.
 
 set -eu
 umask 022
 
-TMPFILE=$(mktemp /etc/locale.gen.XXXXXX)
+target="${LOCALE_GEN_PATH:-/etc/locale.gen}"
+
+TMPFILE=$(mktemp "${target}.XXXXXX")
 trap 'rm -f "$TMPFILE"' EXIT
 cat > "$TMPFILE"
 chmod 0644 "$TMPFILE"
-mv "$TMPFILE" /etc/locale.gen
+mv "$TMPFILE" "$target"
 trap - EXIT
 exec locale-gen
