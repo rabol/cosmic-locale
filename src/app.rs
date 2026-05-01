@@ -271,7 +271,7 @@ impl cosmic::Application for AppModel {
                 |url| Message::LaunchUrl(url.to_string()),
                 Message::ToggleContextPage(ContextPage::About),
             ),
-            ContextPage::CategoryPicker => pages::locale_categories::picker_drawer(self),
+            ContextPage::LocalePicker => pages::locale_categories::picker_drawer(self),
         })
     }
 
@@ -411,7 +411,7 @@ impl cosmic::Application for AppModel {
                     last_error: None,
                     preview: None,
                 });
-                self.context_page = ContextPage::CategoryPicker;
+                self.context_page = ContextPage::LocalePicker;
                 self.core.window.show_context = true;
 
                 return cosmic::task::future(async move {
@@ -623,7 +623,10 @@ pub enum Page {
 pub enum ContextPage {
     #[default]
     About,
-    CategoryPicker,
+    /// Locale picker — handles both per-category edits and the
+    /// "Set system language" action; the actual mode is carried
+    /// by [`PickerState::target`].
+    LocalePicker,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
