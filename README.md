@@ -157,6 +157,25 @@ is disabled.
   app template — the libcosmic nav bar, context drawer, settings
   widgets, and the just-based build flow originated there.
 
+## AI assistance
+
+Parts of cosmic-locale's source code were drafted with the help of
+an AI coding assistant (Claude). The role distribution is worth
+being explicit about:
+
+- The **idea**, scope, milestone plan, and product direction came
+  from the human author.
+- Every feature, UI change, polkit decision, and refactor was
+  **requested** by the human and **approved** before being
+  committed.
+- The human reviewed every diff before it landed on `main` and
+  ran the app at every step to verify behaviour.
+
+The AI was used as a tool for drafting code, surfacing libcosmic
+API patterns, and generating test cases — not for deciding what
+to build or whether a piece of work was correct. Bug reports and
+design feedback belong with the maintainer, not the tool.
+
 ## Disclaimer
 
 The author has made every effort to respect upstream licences and
