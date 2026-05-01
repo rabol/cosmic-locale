@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Cosmic Locale
+Comment=An application to manage locale
+Type=Application
+Icon=dev.rabol.cosmic-locale
+Exec=cosmic-locale %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+MimeType=
