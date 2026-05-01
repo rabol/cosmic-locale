@@ -146,6 +146,17 @@ compilation times, disable LTO in the release profile, install the
 Rust. The [mold][mold] linker will only improve link times if LTO
 is disabled.
 
+## Acknowledgements
+
+- The behaviour cosmic-locale re-implements comes from
+  [MX-Linux's mx-locale][mx-locale], a Qt/C++ tool that wraps
+  `update-locale` and `dpkg-reconfigure locales`. This is not a
+  port of that code — it's a libcosmic application that follows
+  the same overall workflow.
+- The project skeleton came from a [cosmic-utils][cosmic-utils]
+  app template — the libcosmic nav bar, context drawer, settings
+  widgets, and the just-based build flow originated there.
+
 [fluent]: https://projectfluent.org/
 [fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
 [iso-codes]: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
@@ -154,3 +165,5 @@ is disabled.
 [rust-analyzer]: https://rust-analyzer.github.io/
 [mold]: https://github.com/rui314/mold
 [sccache]: https://github.com/mozilla/sccache
+[mx-locale]: https://github.com/MX-Linux/mx-locale
+[cosmic-utils]: https://github.com/cosmic-utils
