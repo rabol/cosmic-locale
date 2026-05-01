@@ -2,15 +2,14 @@
 
 use crate::config::Config;
 use crate::fl;
+use crate::pages;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length, Subscription, futures};
+use cosmic::iced::{Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
-use futures::SinkExt;
 use std::collections::HashMap;
-use std::time::Duration;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
@@ -30,10 +29,6 @@ pub struct AppModel {
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     /// Configuration data that persists between application runs.
     config: Config,
-    /// Time active
-    time: u32,
-    /// Toggle the watch subscription
-    watch_is_active: bool,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -41,9 +36,7 @@ pub struct AppModel {
 pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
-    ToggleWatch,
     UpdateConfig(Config),
-    WatchTick(u32),
 }
 
 /// Create a COSMIC application from the app model
@@ -73,24 +66,28 @@ impl cosmic::Application for AppModel {
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
 
         nav.insert()
-            .text(fl!("page-id", num = 1))
-            .data::<Page>(Page::Page1)
-            .icon(icon::from_name("applications-science-symbolic"))
+            .text(fl!("page-welcome"))
+            .data::<Page>(Page::Welcome)
+            .icon(icon::from_name("emblem-default-symbolic"))
             .activate();
 
         nav.insert()
-            .text(fl!("page-id", num = 2))
-            .data::<Page>(Page::Page2)
-            .icon(icon::from_name("applications-system-symbolic"));
+            .text(fl!("page-current-locale"))
+            .data::<Page>(Page::CurrentLocale)
+            .icon(icon::from_name("preferences-desktop-locale-symbolic"));
 
         nav.insert()
-            .text(fl!("page-id", num = 3))
-            .data::<Page>(Page::Page3)
-            .icon(icon::from_name("applications-games-symbolic"));
+            .text(fl!("page-locale-categories"))
+            .data::<Page>(Page::LocaleCategories)
+            .icon(icon::from_name("view-list-symbolic"));
+
+        nav.insert()
+            .text(fl!("page-locale-management"))
+            .data::<Page>(Page::LocaleManagement)
+            .icon(icon::from_name("system-software-install-symbolic"));
 
         // Create the about widget
         let about = About::default()
@@ -100,14 +97,12 @@ impl cosmic::Application for AppModel {
             .links([(fl!("repository"), REPOSITORY)])
             .license(env!("CARGO_PKG_LICENSE"));
 
-        // Construct the app model with the runtime's core.
         let mut app = AppModel {
             core,
             context_page: ContextPage::default(),
             about,
             nav,
             key_binds: HashMap::new(),
-            // Optional configuration file for an application.
             config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
                 .map(|context| match Config::get_entry(&context) {
                     Ok(config) => config,
@@ -120,11 +115,8 @@ impl cosmic::Application for AppModel {
                     }
                 })
                 .unwrap_or_default(),
-            time: 0,
-            watch_is_active: false,
         };
 
-        // Create a startup command that sets the window title.
         let command = app.update_title();
 
         (app, command)
@@ -168,62 +160,17 @@ impl cosmic::Application for AppModel {
     /// Application events will be processed through the view. Any messages emitted by
     /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<'_, Self::Message> {
-        let space_s = cosmic::theme::spacing().space_s;
-        let content: Element<_> = match self.nav.active_data::<Page>().unwrap() {
-            Page::Page1 => {
-                let header = widget::row::with_capacity(2)
-                    .push(widget::text::title1(fl!("welcome")))
-                    .push(widget::text::title3(fl!("page-id", num = 1)))
-                    .align_y(Alignment::End)
-                    .spacing(space_s);
+        let page = self
+            .nav
+            .active_data::<Page>()
+            .copied()
+            .unwrap_or(Page::Welcome);
 
-                let counter_label = ["Watch: ", self.time.to_string().as_str()].concat();
-                let section = cosmic::widget::settings::section().add(
-                    cosmic::widget::settings::item::builder(counter_label).control(
-                        widget::button::text(if self.watch_is_active {
-                            "Stop"
-                        } else {
-                            "Start"
-                        })
-                        .on_press(Message::ToggleWatch),
-                    ),
-                );
-
-                widget::column::with_capacity(2)
-                    .push(header)
-                    .push(section)
-                    .spacing(space_s)
-                    .height(Length::Fill)
-                    .into()
-            }
-
-            Page::Page2 => {
-                let header = widget::row::with_capacity(2)
-                    .push(widget::text::title1(fl!("welcome")))
-                    .push(widget::text::title3(fl!("page-id", num = 2)))
-                    .align_y(Alignment::End)
-                    .spacing(space_s);
-
-                widget::column::with_capacity(1)
-                    .push(header)
-                    .spacing(space_s)
-                    .height(Length::Fill)
-                    .into()
-            }
-
-            Page::Page3 => {
-                let header = widget::row::with_capacity(2)
-                    .push(widget::text::title1(fl!("welcome")))
-                    .push(widget::text::title3(fl!("page-id", num = 3)))
-                    .align_y(Alignment::End)
-                    .spacing(space_s);
-
-                widget::column::with_capacity(1)
-                    .push(header)
-                    .spacing(space_s)
-                    .height(Length::Fill)
-                    .into()
-            }
+        let content: Element<_> = match page {
+            Page::Welcome => pages::welcome::view(self),
+            Page::CurrentLocale => pages::current_locale::view(self),
+            Page::LocaleCategories => pages::locale_categories::view(self),
+            Page::LocaleManagement => pages::locale_management::view(self),
         };
 
         widget::container(content)
@@ -243,40 +190,16 @@ impl cosmic::Application for AppModel {
     /// stopped and started conditionally based on application state, or persist
     /// indefinitely.
     fn subscription(&self) -> Subscription<Self::Message> {
-        // Add subscriptions which are always active.
-        let mut subscriptions = vec![
-            // Watch for application configuration changes.
-            self.core()
-                .watch_config::<Config>(Self::APP_ID)
-                .map(|update| {
-                    for why in update.errors {
-                        tracing::error!(?why, "app config error");
-                    }
+        // Watch for application configuration changes.
+        self.core()
+            .watch_config::<Config>(Self::APP_ID)
+            .map(|update| {
+                for why in update.errors {
+                    tracing::error!(?why, "app config error");
+                }
 
-                    Message::UpdateConfig(update.config)
-                }),
-        ];
-
-        // Conditionally enables a timer that emits a message every second.
-        if self.watch_is_active {
-            subscriptions.push(Subscription::run(|| {
-                cosmic::iced::stream::channel(
-                    1,
-                    |mut emitter: futures::channel::mpsc::Sender<_>| async move {
-                        let mut time = 1;
-                        let mut interval = tokio::time::interval(Duration::from_secs(1));
-
-                        loop {
-                            interval.tick().await;
-                            _ = emitter.send(Message::WatchTick(time)).await;
-                            time += 1;
-                        }
-                    },
-                )
-            }));
-        }
-
-        Subscription::batch(subscriptions)
+                Message::UpdateConfig(update.config)
+            })
     }
 
     /// Handles messages emitted by the application and its widgets.
@@ -285,14 +208,6 @@ impl cosmic::Application for AppModel {
     /// on the application's async runtime.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
-            Message::WatchTick(time) => {
-                self.time = time;
-            }
-
-            Message::ToggleWatch => {
-                self.watch_is_active = !self.watch_is_active;
-            }
-
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     // Close the context drawer if the toggled context page is the same.
@@ -345,11 +260,13 @@ impl AppModel {
     }
 }
 
-/// The page to display in the application.
+/// Identifies a top-level page in the application.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Page {
-    Page1,
-    Page2,
-    Page3,
+    Welcome,
+    CurrentLocale,
+    LocaleCategories,
+    LocaleManagement,
 }
 
 /// The context page to display in the context drawer.
