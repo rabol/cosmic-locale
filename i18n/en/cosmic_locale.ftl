@@ -13,6 +13,25 @@ page-locale-management = Locale management
 welcome-title = Welcome to Cosmic Locale
 welcome-body = Manage your system language and locale settings.
 
+welcome-pages-title = What you can do here
+welcome-page-current-locale = View the active LANG, LANGUAGE, and any LC_* overrides; reset overrides back to LANG.
+welcome-page-locale-categories = Drill into the twelve POSIX categories with a per-category picker and a live preview.
+welcome-page-locale-management = Toggle which locales are installed by editing /etc/locale.gen and running locale-gen.
+
+welcome-summary-title = System summary
+welcome-summary-loading = Loading…
+welcome-summary-error = Failed to read system locale: { $reason }
+welcome-summary-lang-set = Language: { $lang }
+welcome-summary-lang-unset = Language: not set
+welcome-summary-overrides-none = No category overrides.
+welcome-summary-overrides-some = Category overrides: { $count }.
+welcome-summary-source-file = Loaded from { $path }.
+welcome-summary-source-env = Loaded from the process environment.
+
+welcome-actions-title = Quick actions
+welcome-action-current = View current locale
+welcome-action-management = Manage installed locales
+
 # Placeholder shown on pages whose content has not yet been implemented.
 coming-soon = Coming soon.
 

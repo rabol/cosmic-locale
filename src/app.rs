@@ -104,6 +104,7 @@ pub enum Message {
     OpenCategoryPicker { category: String, current: String },
     PreviewLoaded(LocalePreview),
     ResetLcOverrides,
+    SelectPage(Page),
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
 }
@@ -511,6 +512,17 @@ impl cosmic::Application for AppModel {
                     Message::LocaleGenApplied(locale::apply_locale_gen(&to_apply).await)
                 })
                 .map(cosmic::Action::App);
+            }
+
+            Message::SelectPage(target_page) => {
+                let entity = self
+                    .nav
+                    .iter()
+                    .find(|&entity| self.nav.data::<Page>(entity).copied() == Some(target_page));
+                if let Some(entity) = entity {
+                    self.nav.activate(entity);
+                    return self.update_title();
+                }
             }
 
             Message::LocaleGenApplied(result) => {
