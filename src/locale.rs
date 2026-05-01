@@ -78,6 +78,77 @@ pub struct LoadedLocale {
     pub source: LocaleSource,
 }
 
+/// Where a category's effective value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CategorySource {
+    /// Set explicitly via an `LC_*=` line in the config or the
+    /// process environment.
+    Override,
+    /// No explicit setting; takes its value from `LANG`.
+    Inherited,
+    /// Neither `LANG` nor an explicit override is set; falls back to
+    /// the POSIX `C` locale.
+    Default,
+}
+
+/// Resolved view of a single `LC_*` category.
+#[derive(Debug, Clone)]
+pub struct CategoryView {
+    pub name: &'static str,
+    pub value: String,
+    pub source: CategorySource,
+}
+
+/// The full set of POSIX `LC_*` categories, in the order glibc and
+/// `localectl status` print them. `LC_ALL` is intentionally omitted —
+/// it's a runtime override that isn't stored in the locale config.
+pub const LC_CATEGORIES: &[&str] = &[
+    "LC_CTYPE",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_COLLATE",
+    "LC_MONETARY",
+    "LC_MESSAGES",
+    "LC_PAPER",
+    "LC_NAME",
+    "LC_ADDRESS",
+    "LC_TELEPHONE",
+    "LC_MEASUREMENT",
+    "LC_IDENTIFICATION",
+];
+
+/// Resolve every `LC_*` category against the parsed settings.
+///
+/// For each category, the effective value is the explicit override if
+/// present, otherwise `LANG`'s value, otherwise the POSIX `C` default.
+#[must_use]
+pub fn effective_categories(settings: &LocaleSettings) -> Vec<CategoryView> {
+    LC_CATEGORIES
+        .iter()
+        .map(|&name| {
+            if let Some(code) = settings.lc_overrides.get(name) {
+                CategoryView {
+                    name,
+                    value: code.as_str().to_string(),
+                    source: CategorySource::Override,
+                }
+            } else if let Some(lang) = &settings.lang {
+                CategoryView {
+                    name,
+                    value: lang.as_str().to_string(),
+                    source: CategorySource::Inherited,
+                }
+            } else {
+                CategoryView {
+                    name,
+                    value: "C".to_string(),
+                    source: CategorySource::Default,
+                }
+            }
+        })
+        .collect()
+}
+
 /// Errors that can occur while loading or applying the system locale.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum LocaleError {
@@ -97,6 +168,22 @@ pub enum LocaleError {
     /// recognise as a polkit cancellation.
     #[error("locale daemon error: {0}")]
     Daemon(String),
+
+    /// A non-privileged subprocess (e.g. `locale -a`) failed to launch.
+    #[error("failed to launch {command}: {source}")]
+    CommandSpawnFailed {
+        command: String,
+        #[source]
+        source: Arc<std::io::Error>,
+    },
+
+    /// A non-privileged subprocess exited non-zero.
+    #[error("{command} exited with status {status}: {stderr}")]
+    CommandFailed {
+        command: String,
+        status: i32,
+        stderr: String,
+    },
 }
 
 /// System paths checked for locale configuration, in priority order.
@@ -263,6 +350,169 @@ pub async fn reset_lc_overrides() -> Result<(), LocaleError> {
         .map_err(|e| zbus_to_locale_error(&e))?;
 
     Ok(())
+}
+
+/// Set a single `LC_*` category to the given locale value via systemd-localed.
+///
+/// Reads the current `Locale` array, replaces (or appends) the entry
+/// matching `category`, and submits the result through `SetLocale`.
+/// Other variables stay untouched.
+///
+/// # Errors
+///
+/// See [`reset_lc_overrides`] — the same set of conditions apply.
+pub async fn set_category(category: &str, value: &str) -> Result<(), LocaleError> {
+    let conn = Connection::system()
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+    let proxy = Locale1Proxy::new(&conn)
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+
+    let current = proxy.locale().await.map_err(|e| zbus_to_locale_error(&e))?;
+    let new_locale = build_category_set(&current, category, value);
+    let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
+
+    proxy
+        .set_locale(&new_locale_strs, true)
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+
+    Ok(())
+}
+
+/// Replace (or append) a single category in the locale array.
+///
+/// If `category=` already appears in `current`, its value is replaced;
+/// otherwise the new entry is appended. All other entries pass through
+/// untouched and in the same order.
+fn build_category_set(current: &[String], category: &str, value: &str) -> Vec<String> {
+    let prefix = format!("{category}=");
+    let new_entry = format!("{category}={value}");
+
+    let mut out = Vec::with_capacity(current.len().max(1));
+    let mut replaced = false;
+    for entry in current {
+        if entry.starts_with(&prefix) {
+            out.push(new_entry.clone());
+            replaced = true;
+        } else {
+            out.push(entry.clone());
+        }
+    }
+    if !replaced {
+        out.push(new_entry);
+    }
+    out
+}
+
+/// A small set of human-readable samples for a single locale, used by
+/// the picker's preview panel. Anything we can't compute is left blank.
+#[derive(Debug, Clone)]
+pub struct LocalePreview {
+    pub locale: String,
+    pub date: String,
+    pub time: String,
+    pub datetime: String,
+    pub number: String,
+}
+
+/// Compute a [`LocalePreview`] by shelling out to `date` and `printf`
+/// with `LC_ALL` set to the chosen locale code. Failed sub-calls
+/// degrade gracefully to empty strings.
+pub async fn preview_locale(code: String) -> LocalePreview {
+    let date = run_with_locale(&code, "date", &["+%x"]).await;
+    let time = run_with_locale(&code, "date", &["+%X"]).await;
+    let datetime = run_with_locale(&code, "date", &["+%c"]).await;
+    let number = run_with_locale(&code, "/usr/bin/printf", &["%'d", "1234567"]).await;
+    LocalePreview {
+        locale: code,
+        date,
+        time,
+        datetime,
+        number,
+    }
+}
+
+async fn run_with_locale(locale: &str, program: &str, args: &[&str]) -> String {
+    tokio::process::Command::new(program)
+        .env("LC_ALL", locale)
+        .args(args)
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Run `locale -a` and return the parsed list of installed locales.
+///
+/// Pseudo-locales (`C`, `POSIX`) are filtered out, as are non-UTF-8
+/// entries — matching the convention cosmic-settings uses for its
+/// region picker.
+///
+/// # Errors
+///
+/// Returns [`LocaleError::CommandSpawnFailed`] if `locale` cannot be
+/// launched, or [`LocaleError::CommandFailed`] on a non-zero exit.
+pub async fn list_installed_locales() -> Result<Vec<LocaleCode>, LocaleError> {
+    let output = tokio::process::Command::new("locale")
+        .arg("-a")
+        .output()
+        .await
+        .map_err(|err| LocaleError::CommandSpawnFailed {
+            command: "locale".to_string(),
+            source: Arc::new(err),
+        })?;
+
+    if !output.status.success() {
+        return Err(LocaleError::CommandFailed {
+            command: "locale -a".to_string(),
+            status: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_locale_a(&stdout))
+}
+
+/// Parse the output of `locale -a` into a sorted, deduped list of
+/// validated UTF-8 locale codes.
+///
+/// Drops blank lines, the pseudo-locales `C` and `POSIX` (with or
+/// without a codeset suffix), and anything that doesn't carry a UTF-8
+/// codeset.
+#[must_use]
+pub fn parse_locale_a(output: &str) -> Vec<LocaleCode> {
+    let mut seen = std::collections::BTreeSet::new();
+    for raw in output.lines() {
+        let line = raw.trim();
+        if line.is_empty() || is_pseudo_locale(line) || !is_utf8_locale(line) {
+            continue;
+        }
+        if let Some(code) = LocaleCode::new(line) {
+            seen.insert(code.as_str().to_string());
+        }
+    }
+    seen.into_iter()
+        .filter_map(|s| LocaleCode::new(&s))
+        .collect()
+}
+
+fn is_pseudo_locale(line: &str) -> bool {
+    let stem = line.split('.').next().unwrap_or(line);
+    stem.eq_ignore_ascii_case("C") || stem.eq_ignore_ascii_case("POSIX")
+}
+
+fn is_utf8_locale(line: &str) -> bool {
+    let codeset = match line.split_once('.') {
+        Some((_, after)) => after.split('@').next().unwrap_or(after),
+        None => return false,
+    };
+    let normalised = codeset.replace('-', "").to_ascii_lowercase();
+    normalised == "utf8"
 }
 
 /// Compute the new locale array for "reset overrides to language": keep
@@ -493,6 +743,140 @@ LANG=en_US.UTF-8
         let current = vec!["LC_TIME=da_DK.utf8".to_string()];
         let result = build_reset_locale(&current);
         assert!(matches!(result, Err(LocaleError::Daemon(_))));
+    }
+
+    fn lang(value: &str) -> LocaleCode {
+        LocaleCode::new(value).unwrap()
+    }
+
+    #[test]
+    fn effective_returns_all_twelve_categories_in_order() {
+        let settings = LocaleSettings::default();
+        let result = effective_categories(&settings);
+        assert_eq!(result.len(), LC_CATEGORIES.len());
+        for (view, expected_name) in result.iter().zip(LC_CATEGORIES.iter()) {
+            assert_eq!(view.name, *expected_name);
+        }
+    }
+
+    #[test]
+    fn effective_inherits_from_lang_when_no_overrides() {
+        let mut settings = LocaleSettings::default();
+        settings.lang = Some(lang("en_US.UTF-8"));
+
+        for view in effective_categories(&settings) {
+            assert_eq!(view.value, "en_US.UTF-8");
+            assert_eq!(view.source, CategorySource::Inherited);
+        }
+    }
+
+    #[test]
+    fn effective_marks_explicit_overrides() {
+        let mut settings = LocaleSettings::default();
+        settings.lang = Some(lang("en_US.UTF-8"));
+        settings
+            .lc_overrides
+            .insert("LC_TIME".to_string(), lang("en_DK.UTF-8"));
+        settings
+            .lc_overrides
+            .insert("LC_NUMERIC".to_string(), lang("de_DE.UTF-8"));
+
+        let by_name: std::collections::HashMap<_, _> = effective_categories(&settings)
+            .into_iter()
+            .map(|v| (v.name, v))
+            .collect();
+
+        let lc_time = &by_name["LC_TIME"];
+        assert_eq!(lc_time.value, "en_DK.UTF-8");
+        assert_eq!(lc_time.source, CategorySource::Override);
+
+        let lc_numeric = &by_name["LC_NUMERIC"];
+        assert_eq!(lc_numeric.value, "de_DE.UTF-8");
+        assert_eq!(lc_numeric.source, CategorySource::Override);
+
+        // Categories without an override should inherit LANG.
+        let lc_ctype = &by_name["LC_CTYPE"];
+        assert_eq!(lc_ctype.value, "en_US.UTF-8");
+        assert_eq!(lc_ctype.source, CategorySource::Inherited);
+    }
+
+    #[test]
+    fn effective_falls_back_to_c_when_nothing_set() {
+        let settings = LocaleSettings::default();
+        for view in effective_categories(&settings) {
+            assert_eq!(view.value, "C");
+            assert_eq!(view.source, CategorySource::Default);
+        }
+    }
+
+    #[test]
+    fn build_category_set_replaces_existing() {
+        let current = vec![
+            "LANG=en_US.UTF-8".to_string(),
+            "LC_TIME=da_DK.utf8".to_string(),
+            "LC_NUMERIC=de_DE.utf8".to_string(),
+        ];
+        let result = build_category_set(&current, "LC_TIME", "fr_FR.UTF-8");
+        assert_eq!(
+            result,
+            vec![
+                "LANG=en_US.UTF-8".to_string(),
+                "LC_TIME=fr_FR.UTF-8".to_string(),
+                "LC_NUMERIC=de_DE.utf8".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_category_set_appends_when_absent() {
+        let current = vec!["LANG=en_US.UTF-8".to_string()];
+        let result = build_category_set(&current, "LC_TIME", "en_DK.UTF-8");
+        assert_eq!(
+            result,
+            vec![
+                "LANG=en_US.UTF-8".to_string(),
+                "LC_TIME=en_DK.UTF-8".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_locale_a_filters_pseudo_and_non_utf8() {
+        let output = "
+C
+C.UTF-8
+POSIX
+en_US
+en_US.UTF-8
+de_DE.utf8
+fr_FR.iso88591
+de_DE.UTF-8@euro
+";
+        let result = parse_locale_a(output);
+        let codes: Vec<&str> = result.iter().map(LocaleCode::as_str).collect();
+        // C* and POSIX dropped; en_US has no codeset → dropped; iso88591 → dropped.
+        // de_DE.utf8 and de_DE.UTF-8@euro both pass (utf8 normalisation).
+        assert!(codes.contains(&"en_US.UTF-8"));
+        assert!(codes.contains(&"de_DE.utf8"));
+        assert!(codes.contains(&"de_DE.UTF-8@euro"));
+        assert!(!codes.iter().any(|c| c.starts_with('C')));
+        assert!(!codes.contains(&"POSIX"));
+        assert!(!codes.contains(&"en_US"));
+        assert!(!codes.contains(&"fr_FR.iso88591"));
+    }
+
+    #[test]
+    fn parse_locale_a_dedupes_and_sorts() {
+        let output = "fr_FR.UTF-8\nde_DE.UTF-8\nfr_FR.UTF-8\nen_US.UTF-8\n";
+        let result = parse_locale_a(output);
+        let codes: Vec<&str> = result.iter().map(LocaleCode::as_str).collect();
+        assert_eq!(codes, vec!["de_DE.UTF-8", "en_US.UTF-8", "fr_FR.UTF-8"]);
+    }
+
+    #[test]
+    fn parse_locale_a_handles_empty_output() {
+        assert!(parse_locale_a("").is_empty());
+        assert!(parse_locale_a("\n\n  \n").is_empty());
     }
 
     #[test]

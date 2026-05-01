@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::fl;
-use crate::locale::{self, LoadedLocale, LocaleError, LocaleSource};
+use crate::locale::{self, LoadedLocale, LocaleCode, LocaleError, LocalePreview, LocaleSource};
 use crate::pages;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -39,14 +39,40 @@ pub struct AppModel {
     /// Error from the most recent reset attempt, if any. Cleared on the
     /// next attempt or on a successful reset.
     pub(crate) last_reset_error: Option<LocaleError>,
+    /// Installed locales from `locale -a`. `None` while loading.
+    pub(crate) available_locales: Option<Result<Vec<LocaleCode>, LocaleError>>,
+    /// State of the per-category picker, if a category is being edited.
+    pub(crate) picker: Option<PickerState>,
+}
+
+/// State for the per-category locale picker shown in the context drawer.
+#[derive(Debug, Clone)]
+pub struct PickerState {
+    pub category: String,
+    pub initial_value: String,
+    pub selected: String,
+    pub search: String,
+    pub in_flight: bool,
+    pub last_error: Option<LocaleError>,
+    /// Cached preview for `selected`. Stale results (where the locale
+    /// no longer matches `selected`) are dropped on arrival.
+    pub preview: Option<LocalePreview>,
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
+    AvailableLocalesLoaded(Result<Vec<LocaleCode>, LocaleError>),
+    CategoryPickerApply,
+    CategoryPickerCancel,
+    CategoryPickerSearch(String),
+    CategoryPickerSelect(String),
+    CategoryUpdated(Result<(), LocaleError>),
     CurrentLocaleLoaded(Result<LoadedLocale, LocaleError>),
     LaunchUrl(String),
     LcOverridesReset(Result<(), LocaleError>),
+    OpenCategoryPicker { category: String, current: String },
+    PreviewLoaded(LocalePreview),
     ResetLcOverrides,
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
@@ -131,6 +157,8 @@ impl cosmic::Application for AppModel {
             current_locale: None,
             reset_in_flight: false,
             last_reset_error: None,
+            available_locales: None,
+            picker: None,
         };
 
         let title_command = app.update_title();
@@ -138,8 +166,15 @@ impl cosmic::Application for AppModel {
             Message::CurrentLocaleLoaded(locale::read_default_locale().await)
         })
         .map(cosmic::Action::App);
+        let load_available = cosmic::task::future(async {
+            Message::AvailableLocalesLoaded(locale::list_installed_locales().await)
+        })
+        .map(cosmic::Action::App);
 
-        (app, Task::batch([title_command, load_locale]))
+        (
+            app,
+            Task::batch([title_command, load_locale, load_available]),
+        )
     }
 
     /// Elements to pack at the start of the header bar.
@@ -172,6 +207,7 @@ impl cosmic::Application for AppModel {
                 |url| Message::LaunchUrl(url.to_string()),
                 Message::ToggleContextPage(ContextPage::About),
             ),
+            ContextPage::CategoryPicker => pages::locale_categories::picker_drawer(self),
         })
     }
 
@@ -226,6 +262,7 @@ impl cosmic::Application for AppModel {
     ///
     /// Tasks may be returned for asynchronous execution of code in the background
     /// on the application's async runtime.
+    #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
             Message::CurrentLocaleLoaded(result) => {
@@ -292,6 +329,112 @@ impl cosmic::Application for AppModel {
                     tracing::error!(%err, %url, "failed to open url");
                 }
             },
+
+            Message::AvailableLocalesLoaded(result) => {
+                if let Err(why) = &result {
+                    tracing::error!(%why, "failed to list installed locales");
+                }
+                self.available_locales = Some(result);
+            }
+
+            Message::OpenCategoryPicker { category, current } => {
+                self.picker = Some(PickerState {
+                    category: category.clone(),
+                    initial_value: current.clone(),
+                    selected: current.clone(),
+                    search: String::new(),
+                    in_flight: false,
+                    last_error: None,
+                    preview: None,
+                });
+                self.context_page = ContextPage::CategoryPicker;
+                self.core.window.show_context = true;
+
+                return cosmic::task::future(async move {
+                    Message::PreviewLoaded(locale::preview_locale(current).await)
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::CategoryPickerSearch(search) => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.search = search;
+                }
+            }
+
+            Message::CategoryPickerSelect(value) => {
+                let Some(picker) = self.picker.as_mut() else {
+                    return Task::none();
+                };
+                if picker.selected == value {
+                    return Task::none();
+                }
+                picker.selected.clone_from(&value);
+                picker.last_error = None;
+                // Drop the stale preview so the panel doesn't show
+                // values for the previously-selected locale while the
+                // new one is being computed.
+                picker.preview = None;
+
+                return cosmic::task::future(async move {
+                    Message::PreviewLoaded(locale::preview_locale(value).await)
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::PreviewLoaded(preview) => {
+                if let Some(picker) = self.picker.as_mut()
+                    && picker.selected == preview.locale
+                {
+                    picker.preview = Some(preview);
+                }
+            }
+
+            Message::CategoryPickerCancel => {
+                self.picker = None;
+                self.core.window.show_context = false;
+            }
+
+            Message::CategoryPickerApply => {
+                let Some(picker) = self.picker.as_mut() else {
+                    return Task::none();
+                };
+                if picker.in_flight || picker.selected == picker.initial_value {
+                    return Task::none();
+                }
+
+                picker.in_flight = true;
+                picker.last_error = None;
+
+                let category = picker.category.clone();
+                let value = picker.selected.clone();
+
+                return cosmic::task::future(async move {
+                    Message::CategoryUpdated(locale::set_category(&category, &value).await)
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::CategoryUpdated(result) => {
+                match result {
+                    Ok(()) => {
+                        // Close the picker and refresh the page.
+                        self.picker = None;
+                        self.core.window.show_context = false;
+                        return cosmic::task::future(async {
+                            Message::CurrentLocaleLoaded(locale::read_default_locale().await)
+                        })
+                        .map(cosmic::Action::App);
+                    }
+                    Err(err) => {
+                        tracing::error!(%err, "failed to update LC_* category");
+                        if let Some(picker) = self.picker.as_mut() {
+                            picker.in_flight = false;
+                            picker.last_error = Some(err);
+                        }
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -337,6 +480,7 @@ pub enum Page {
 pub enum ContextPage {
     #[default]
     About,
+    CategoryPicker,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
