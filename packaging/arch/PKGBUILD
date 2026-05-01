@@ -1,0 +1,41 @@
+# Maintainer: Steen Rabol <steen@rabol.dev>
+pkgname=cosmic-locale
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="COSMIC application for managing system language and locale settings"
+arch=('x86_64' 'aarch64')
+url="https://github.com/rabol/cosmic-locale"
+license=('GPL-3.0-only')
+depends=(
+    'polkit'
+    'systemd'
+)
+optdepends=(
+    'cosmic-osd: polkit authentication agent for COSMIC sessions'
+    'polkit-gnome: polkit authentication agent for GNOME / Xfce sessions'
+    'lxqt-policykit: lightweight DE-agnostic polkit authentication agent'
+)
+makedepends=(
+    'just'
+    'rust'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    cargo fetch --locked
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    just build-release
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    just rootdir="$pkgdir" prefix=/usr install
+
+    install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

@@ -127,6 +127,28 @@ It is recommended to build a source tarball with the vendored
 dependencies, which can typically be done by running `just vendor`
 on the host system before it enters the build environment.
 
+Two off-the-shelf packaging recipes ship with the project:
+
+- **Arch Linux** — [packaging/arch/PKGBUILD](./packaging/arch/PKGBUILD).
+  Build with `cd packaging/arch && makepkg -si`. The PKGBUILD
+  pulls a versioned tarball from the GitHub releases page, so it
+  expects the version tag (`pkgver`) to exist upstream; bump it
+  in the file when cutting new releases.
+- **Debian / Ubuntu / Pop!_OS** — `Cargo.toml` carries a
+  `[package.metadata.deb]` table. With [cargo-deb][cargo-deb]
+  installed:
+
+  ```sh
+  just build-release       # produce target/release/cosmic-locale
+  cargo deb                # produces target/debian/cosmic-locale_<ver>_<arch>.deb
+  ```
+
+  The asset list mirrors `just install` exactly — binary, desktop
+  entry, appstream metainfo, icon, polkit policy, polkit rules,
+  and the privileged helper.
+
+[cargo-deb]: https://github.com/kornelski/cargo-deb
+
 ## Translators
 
 [Fluent][fluent] is used for localization. Fluent's translation

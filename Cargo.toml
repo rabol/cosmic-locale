@@ -44,3 +44,31 @@ features = [
 # libcosmic = { path = "../libcosmic" }
 # cosmic-config = { path = "../libcosmic/cosmic-config" }
 # cosmic-theme = { path = "../libcosmic/cosmic-theme" }
+
+# Build a Debian / Ubuntu / Pop!_OS .deb with `cargo deb`. Mirrors the
+# layout `just install` would produce: binary, desktop entry, appdata,
+# icon, polkit policy, polkit rules, and the privileged helper. Run
+# `just build-release` first so the binary exists at the path below.
+[package.metadata.deb]
+maintainer = "Steen Rabol <steen@rabol.dev>"
+copyright = "2026, Steen Rabol <steen@rabol.dev>"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+A native libcosmic application for managing system language and locale \
+settings. Talks to systemd-localed over D-Bus for per-category and \
+LANG-level changes, and ships a polkit-mediated helper for editing \
+/etc/locale.gen and running locale-gen."""
+section = "admin"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/cosmic-locale", "usr/bin/", "755"],
+    ["resources/dev.rabol.cosmic-locale.desktop", "usr/share/applications/", "644"],
+    ["resources/dev.rabol.cosmic-locale.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["resources/icons/hicolor/scalable/apps/icon.svg", "usr/share/icons/hicolor/scalable/apps/dev.rabol.cosmic-locale.svg", "644"],
+    ["resources/dev.rabol.cosmic-locale.policy", "usr/share/polkit-1/actions/", "644"],
+    ["resources/dev.rabol.cosmic-locale.rules", "usr/share/polkit-1/rules.d/", "644"],
+    ["resources/apply-locale-gen", "usr/libexec/cosmic-locale/apply-locale-gen", "755"],
+    ["README.md", "usr/share/doc/cosmic-locale/README.md", "644"],
+    ["LICENSE", "usr/share/doc/cosmic-locale/LICENSE", "644"],
+]
