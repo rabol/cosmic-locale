@@ -6,7 +6,7 @@
 
 use crate::app::{AppModel, LocaleGenState, Message};
 use crate::fl;
-use crate::locale::LocaleError;
+use crate::locale::{self, LocaleError};
 use cosmic::iced::Length;
 use cosmic::prelude::*;
 use cosmic::widget::{self, settings};
@@ -17,7 +17,7 @@ pub fn view(model: &AppModel) -> Element<'_, Message> {
     let body: Element<'_, Message> = match &model.locale_gen {
         None => widget::text::body(fl!("locale-management-loading")).into(),
         Some(Err(err)) => render_load_error(err),
-        Some(Ok(state)) => render_loaded(state),
+        Some(Ok(state)) => render_loaded(state, model.helper_installed),
     };
 
     widget::column::with_capacity(2)
@@ -28,7 +28,7 @@ pub fn view(model: &AppModel) -> Element<'_, Message> {
         .into()
 }
 
-fn render_loaded(state: &LocaleGenState) -> Element<'_, Message> {
+fn render_loaded(state: &LocaleGenState, helper_installed: bool) -> Element<'_, Message> {
     let space_s = cosmic::theme::spacing().space_s;
 
     let search = widget::text_input(
@@ -62,13 +62,20 @@ fn render_loaded(state: &LocaleGenState) -> Element<'_, Message> {
         widget::scrollable(list).height(Length::Fill).into()
     };
 
-    let footer = render_footer(state);
+    let footer = render_footer(state, helper_installed);
 
-    let mut column = widget::column::with_capacity(4)
+    let mut column = widget::column::with_capacity(5)
         .push(search)
         .push(list_element)
         .push(footer)
         .spacing(space_s);
+
+    if !helper_installed {
+        column = column.push(widget::text::body(fl!(
+            "locale-management-helper-missing",
+            path = locale::APPLY_LOCALE_GEN_HELPER
+        )));
+    }
 
     if let Some(err) = &state.last_error {
         column = column.push(widget::text::body(apply_error_message(err)));
@@ -80,14 +87,14 @@ fn render_loaded(state: &LocaleGenState) -> Element<'_, Message> {
         .into()
 }
 
-fn render_footer(state: &LocaleGenState) -> Element<'_, Message> {
+fn render_footer(state: &LocaleGenState, helper_installed: bool) -> Element<'_, Message> {
     let label = if state.in_flight {
         fl!("locale-management-applying")
     } else {
         fl!("locale-management-apply")
     };
     let mut button = widget::button::suggested(label);
-    if !state.in_flight && state.is_dirty() {
+    if !state.in_flight && state.is_dirty() && helper_installed {
         button = button.on_press(Message::LocaleGenApply);
     }
     button.into()

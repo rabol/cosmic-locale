@@ -78,6 +78,7 @@ locale-management-apply = Apply
 locale-management-applying = Applying…
 locale-management-apply-failed = Could not apply: { $reason }
 locale-management-apply-cancelled = Authentication cancelled or denied.
+locale-management-helper-missing = The privileged helper is not installed at { $path }. Run `sudo just install` from the project root so the Apply button can rewrite /etc/locale.gen and run locale-gen.
 
 current-locale-reset = Reset overrides to language
 current-locale-reset-pending = Resetting…

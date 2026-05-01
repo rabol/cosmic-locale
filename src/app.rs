@@ -48,6 +48,10 @@ pub struct AppModel {
     /// Parsed `/etc/locale.gen` plus the user's pending edits.
     /// `None` while the initial load is in flight.
     pub(crate) locale_gen: Option<Result<LocaleGenState, LocaleError>>,
+    /// Whether the privileged helper that the Locale management page
+    /// invokes via `pkexec` is installed on disk. Captured once at
+    /// startup; `just install` puts it in place.
+    pub(crate) helper_installed: bool,
 }
 
 /// State for the locale-management page: the freshly-loaded baseline,
@@ -191,7 +195,15 @@ impl cosmic::Application for AppModel {
             available_locales: None,
             picker: None,
             locale_gen: None,
+            helper_installed: locale::helper_installed(),
         };
+
+        if !app.helper_installed {
+            tracing::warn!(
+                path = locale::APPLY_LOCALE_GEN_HELPER,
+                "privileged helper not installed; Apply on the locale management page will be disabled until `sudo just install` has been run"
+            );
+        }
 
         let title_command = app.update_title();
         let load_locale = cosmic::task::future(async {

@@ -466,7 +466,20 @@ const LOCALE_GEN_PATH: &str = "/etc/locale.gen";
 /// `resources/apply-locale-gen`. Pkexec resolves this path to our
 /// named polkit action via the `org.freedesktop.policykit.exec.path`
 /// annotation in the shipped `.policy` file.
-const APPLY_LOCALE_GEN_HELPER: &str = "/usr/libexec/cosmic-locale/apply-locale-gen";
+pub const APPLY_LOCALE_GEN_HELPER: &str = "/usr/libexec/cosmic-locale/apply-locale-gen";
+
+/// Whether the privileged helper exists on disk.
+///
+/// `just install` puts it at [`APPLY_LOCALE_GEN_HELPER`]; from a
+/// fresh checkout running `just run` without first running
+/// `sudo just install` it won't be there yet, and trying to apply
+/// changes from the locale management page would fail with whatever
+/// stderr `pkexec` produces. The page uses this check to disable
+/// the Apply button and show a clearer message instead.
+#[must_use]
+pub fn helper_installed() -> bool {
+    std::path::Path::new(APPLY_LOCALE_GEN_HELPER).exists()
+}
 
 /// One row in `/etc/locale.gen` that the user can toggle on or off.
 #[derive(Debug, Clone, PartialEq, Eq)]
