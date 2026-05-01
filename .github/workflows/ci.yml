@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: fmt + clippy + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # libcosmic / iced / wayland / dbus need a handful of -dev
+      # packages on a stock ubuntu-latest runner. dbus-run-session
+      # comes from the `dbus` package and is what gives the
+      # tests/dbus_tests module a session bus to register the mock
+      # locale1 service against.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libdbus-1-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libudev-dev \
+            libfontconfig-dev \
+            dbus
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: extractions/setup-just@v3
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy (just check)
+        run: just check
+
+      - name: Tests (with session bus)
+        run: dbus-run-session -- cargo test
