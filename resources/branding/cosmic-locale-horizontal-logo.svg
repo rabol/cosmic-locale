@@ -1,26 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">cosmic-locale app icon</title>
-  <desc id="desc">Rounded app icon for cosmic-locale.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">cosmic-locale horizontal logo</title>
+  <desc id="desc">Horizontal logo for cosmic-locale.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#101827"/>
-      <stop offset="1" stop-color="#050814"/>
-    </linearGradient>
-    <linearGradient id="orbitGradient" x1="86" y1="120" x2="430" y2="405" gradientUnits="userSpaceOnUse">
+    <linearGradient id="orbitGradient" x1="60" y1="80" x2="400" y2="330" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#00D4FF"/>
       <stop offset="0.45" stop-color="#4D7CFF"/>
       <stop offset="0.72" stop-color="#8B5CF6"/>
       <stop offset="1" stop-color="#FF4DDB"/>
     </linearGradient>
-    <linearGradient id="planetGradient" x1="120" y1="80" x2="170" y2="138" gradientUnits="userSpaceOnUse">
+    <linearGradient id="textGrad" x1="655" y1="0" x2="1040" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4D7CFF"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#FF4DDB"/>
+    </linearGradient>
+    <linearGradient id="planetGradient" x1="88" y1="66" x2="140" y2="120" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#61F4FF"/>
       <stop offset="1" stop-color="#2878FF"/>
     </linearGradient>
   </defs>
-  <rect x="28" y="28" width="456" height="456" rx="92" fill="url(#bg)"/>
-  <rect x="29" y="29" width="454" height="454" rx="91" fill="none" stroke="#253044" stroke-width="2"/>
 
-  <g transform="translate(0 6) scale(0.96)" transform-origin="256 256" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(10 18) scale(0.78)" fill="none" stroke-linecap="round" stroke-linejoin="round">
     <ellipse cx="256" cy="266" rx="205" ry="98" transform="rotate(-20 256 266)" stroke="url(#orbitGradient)" stroke-width="24"/>
     <path d="M154 111 C206 62 294 63 352 115 C410 168 424 251 385 322 C349 387 275 421 203 399" stroke="url(#orbitGradient)" stroke-width="24"/>
     <path d="M148 374 C209 426 306 430 372 374" stroke="url(#orbitGradient)" stroke-width="18" opacity="0.85"/>
@@ -35,4 +34,7 @@
     <circle cx="133" cy="113" r="34" fill="url(#planetGradient)" stroke="#07111F" stroke-width="8"/>
     <circle cx="122" cy="101" r="9" fill="#E6E6E6" opacity="0.95"/>
   </g>
+
+  <text x="395" y="250" font-family="Inter, Cantarell, Segoe UI, sans-serif" font-weight="800" font-size="104" fill="#FFFFFF">cosmic-</text>
+  <text x="755" y="250" font-family="Inter, Cantarell, Segoe UI, sans-serif" font-weight="800" font-size="104" fill="url(#textGrad)">locale</text>
 </svg>

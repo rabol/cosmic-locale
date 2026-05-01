@@ -1,4 +1,6 @@
-# Cosmic Locale
+<p align="center">
+  <img src="resources/branding/cosmic-locale-horizontal-logo.svg" alt="cosmic-locale" width="640">
+</p>
 
 A native [libcosmic](https://github.com/pop-os/libcosmic) application
 for managing system language and locale settings on Linux. Inspired

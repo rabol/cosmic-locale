@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">cosmic-locale icon</title>
+  <desc id="desc">Cosmic orbit logo with terminal prompt and globe for locale settings.</desc>
+  <defs>
+    <linearGradient id="orbitGradient" x1="86" y1="120" x2="430" y2="405" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00D4FF"/>
+      <stop offset="0.45" stop-color="#4D7CFF"/>
+      <stop offset="0.72" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#FF4DDB"/>
+    </linearGradient>
+    <linearGradient id="planetGradient" x1="120" y1="80" x2="170" y2="138" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#61F4FF"/>
+      <stop offset="1" stop-color="#2878FF"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#softShadow)">
+    <!-- Main tilted orbit -->
+    <ellipse cx="256" cy="266" rx="205" ry="98"
+             transform="rotate(-20 256 266)"
+             stroke="url(#orbitGradient)" stroke-width="24"/>
+
+    <!-- Upright broken orbit, matching the presentation/logo feel -->
+    <path d="M154 111
+             C206 62 294 63 352 115
+             C410 168 424 251 385 322
+             C349 387 275 421 203 399"
+          stroke="url(#orbitGradient)" stroke-width="24"/>
+
+    <!-- lower accent orbit -->
+    <path d="M148 374
+             C209 426 306 430 372 374"
+          stroke="url(#orbitGradient)" stroke-width="18" opacity="0.85"/>
+
+    <!-- right magenta orbital sweep -->
+    <path d="M366 133
+             C430 146 458 210 423 264
+             C404 294 376 313 344 326"
+          stroke="url(#orbitGradient)" stroke-width="22"/>
+
+    <!-- terminal prompt -->
+    <path d="M177 192 L258 256 L177 320"
+          stroke="#FFFFFF" stroke-width="34"/>
+    <path d="M275 316 H323"
+          stroke="#FFFFFF" stroke-width="18"/>
+
+    <!-- globe -->
+    <circle cx="345" cy="331" r="43" stroke="url(#orbitGradient)" stroke-width="12" fill="none"/>
+    <ellipse cx="345" cy="331" rx="18" ry="43" stroke="#8B5CF6" stroke-width="6"/>
+    <path d="M306 331 H384" stroke="#8B5CF6" stroke-width="6"/>
+    <path d="M314 311 C335 321 359 321 377 311" stroke="#8B5CF6" stroke-width="6"/>
+    <path d="M314 351 C335 341 359 341 377 351" stroke="#8B5CF6" stroke-width="6"/>
+
+    <!-- planet / locale dot -->
+    <circle cx="133" cy="113" r="34" fill="url(#planetGradient)" stroke="#07111F" stroke-width="8"/>
+    <circle cx="122" cy="101" r="9" fill="#E6E6E6" opacity="0.95"/>
+  </g>
+</svg>

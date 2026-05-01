@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">cosmic-locale monochrome white icon</title>
+  <desc id="desc">Single color cosmic-locale icon.</desc>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="256" cy="266" rx="205" ry="98" transform="rotate(-20 256 266)" stroke-width="24"/>
+    <path d="M154 111 C206 62 294 63 352 115 C410 168 424 251 385 322 C349 387 275 421 203 399" stroke-width="24"/>
+    <path d="M148 374 C209 426 306 430 372 374" stroke-width="18" opacity="0.85"/>
+    <path d="M366 133 C430 146 458 210 423 264 C404 294 376 313 344 326" stroke-width="22"/>
+    <path d="M177 192 L258 256 L177 320" stroke-width="34"/>
+    <path d="M275 316 H323" stroke-width="18"/>
+    <circle cx="345" cy="331" r="43" stroke-width="12"/>
+    <ellipse cx="345" cy="331" rx="18" ry="43" stroke-width="6"/>
+    <path d="M306 331 H384" stroke-width="6"/>
+    <path d="M314 311 C335 321 359 321 377 311" stroke-width="6"/>
+    <path d="M314 351 C335 341 359 341 377 351" stroke-width="6"/>
+  </g>
+  <circle cx="133" cy="113" r="34" fill="#FFFFFF"/>
+  <circle cx="122" cy="101" r="9" fill="#000000" opacity="0.45"/>
+</svg>
