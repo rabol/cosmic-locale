@@ -41,7 +41,7 @@ clean-dist: clean clean-vendor
 
 # Compiles with debug profile
 build-debug *args:
-    cargo build --locked {{args}}
+    cargo build {{args}}
 
 # Compiles with release profile
 build-release *args: (build-debug '--release' args)
