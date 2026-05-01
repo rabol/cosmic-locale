@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::fl;
+use crate::locale::{self, LoadedLocale, LocaleError, LocaleSource};
 use crate::pages;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -29,12 +30,24 @@ pub struct AppModel {
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     /// Configuration data that persists between application runs.
     config: Config,
+    /// Result of the most recent system locale read.
+    ///
+    /// `None` while the initial load is in flight.
+    pub(crate) current_locale: Option<Result<LoadedLocale, LocaleError>>,
+    /// `true` while a `localectl` reset is awaiting completion.
+    pub(crate) reset_in_flight: bool,
+    /// Error from the most recent reset attempt, if any. Cleared on the
+    /// next attempt or on a successful reset.
+    pub(crate) last_reset_error: Option<LocaleError>,
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
+    CurrentLocaleLoaded(Result<LoadedLocale, LocaleError>),
     LaunchUrl(String),
+    LcOverridesReset(Result<(), LocaleError>),
+    ResetLcOverrides,
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
 }
@@ -115,11 +128,18 @@ impl cosmic::Application for AppModel {
                     }
                 })
                 .unwrap_or_default(),
+            current_locale: None,
+            reset_in_flight: false,
+            last_reset_error: None,
         };
 
-        let command = app.update_title();
+        let title_command = app.update_title();
+        let load_locale = cosmic::task::future(async {
+            Message::CurrentLocaleLoaded(locale::read_default_locale().await)
+        })
+        .map(cosmic::Action::App);
 
-        (app, command)
+        (app, Task::batch([title_command, load_locale]))
     }
 
     /// Elements to pack at the start of the header bar.
@@ -208,6 +228,49 @@ impl cosmic::Application for AppModel {
     /// on the application's async runtime.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
+            Message::CurrentLocaleLoaded(result) => {
+                if let Err(why) = &result {
+                    tracing::error!(%why, "failed to read system locale");
+                }
+                self.current_locale = Some(result);
+            }
+
+            Message::ResetLcOverrides => {
+                let Some(Ok(loaded)) = &self.current_locale else {
+                    return Task::none();
+                };
+                if !matches!(loaded.source, LocaleSource::File(_))
+                    || loaded.settings.lc_overrides.is_empty()
+                    || self.reset_in_flight
+                {
+                    return Task::none();
+                }
+
+                self.reset_in_flight = true;
+                self.last_reset_error = None;
+
+                return cosmic::task::future(async {
+                    Message::LcOverridesReset(locale::reset_lc_overrides().await)
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::LcOverridesReset(result) => {
+                self.reset_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        return cosmic::task::future(async {
+                            Message::CurrentLocaleLoaded(locale::read_default_locale().await)
+                        })
+                        .map(cosmic::Action::App);
+                    }
+                    Err(err) => {
+                        tracing::error!(%err, "failed to reset LC_* overrides");
+                        self.last_reset_error = Some(err);
+                    }
+                }
+            }
+
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     // Close the context drawer if the toggled context page is the same.

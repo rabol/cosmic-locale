@@ -925,9 +925,11 @@ dependencies = [
  "libcosmic",
  "open",
  "rust-embed",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]
