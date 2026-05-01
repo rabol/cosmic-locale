@@ -8,7 +8,13 @@
 
   <action id="dev.rabol.cosmic-locale.apply-locale-gen">
     <description>Regenerate system locales</description>
+    <description xml:lang="da">Regenerér systemlokaliteter</description>
+    <description xml:lang="de">Systemlocales neu generieren</description>
+    <description xml:lang="es">Regenerar configuraciones regionales del sistema</description>
     <message>Authentication is required to regenerate the list of installed locales.</message>
+    <message xml:lang="da">Godkendelse er påkrævet for at regenerere listen over installerede lokaliteter.</message>
+    <message xml:lang="de">Authentifizierung ist erforderlich, um die Liste der installierten Locales neu zu generieren.</message>
+    <message xml:lang="es">Se requiere autenticación para regenerar la lista de configuraciones regionales instaladas.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
