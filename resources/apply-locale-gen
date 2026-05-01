@@ -1,0 +1,21 @@
+#!/bin/sh
+# cosmic-locale apply-locale-gen helper.
+#
+# Reads a new /etc/locale.gen on stdin, atomically writes it via a
+# tempfile + rename, then runs locale-gen. Invoked via pkexec.
+#
+# pkexec resolves the polkit action through the
+# org.freedesktop.policykit.exec.path annotation in
+# /usr/share/polkit-1/actions/dev.rabol.cosmic-locale.policy, so this
+# helper does not need to declare the action itself.
+
+set -eu
+umask 022
+
+TMPFILE=$(mktemp /etc/locale.gen.XXXXXX)
+trap 'rm -f "$TMPFILE"' EXIT
+cat > "$TMPFILE"
+chmod 0644 "$TMPFILE"
+mv "$TMPFILE" /etc/locale.gen
+trap - EXIT
+exec locale-gen

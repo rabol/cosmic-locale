@@ -1,0 +1,24 @@
+// cosmic-locale polkit rules.
+//
+// Grants two actions to local active wheel/sudo users without a prompt:
+//
+//   - dev.rabol.cosmic-locale.apply-locale-gen
+//       Our own action; runs the apply-locale-gen helper that rewrites
+//       /etc/locale.gen and runs locale-gen.
+//
+//   - org.freedesktop.locale1.set-locale
+//       systemd-localed's action used by the per-category picker and
+//       the reset-overrides flow. Mirrors the rule the cosmic-settings
+//       package ships at /usr/share/polkit-1/rules.d/cosmic-settings.rules
+//       so cosmic-locale works the same way even when cosmic-settings
+//       is not installed.
+
+polkit.addRule(function(action, subject) {
+    if ((action.id == "dev.rabol.cosmic-locale.apply-locale-gen" ||
+            action.id == "org.freedesktop.locale1.set-locale") &&
+        subject.local &&
+        subject.active &&
+        (subject.isInGroup("sudo") || subject.isInGroup("wheel"))) {
+            return polkit.Result.YES;
+        }
+});

@@ -16,6 +16,12 @@ appdata := appid + '.metainfo.xml'
 desktop := appid + '.desktop'
 # Application's icon.
 icon-svg := appid + '.svg'
+# Polkit action declaration.
+policy := appid + '.policy'
+# Polkit rules granting our action and the systemd-localed action.
+polkit-rule := appid + '.rules'
+# Privileged helper invoked by pkexec.
+helper-name := 'apply-locale-gen'
 
 # Install destinations
 base-dir := absolute_path(clean(rootdir / prefix))
@@ -24,6 +30,9 @@ bin-dst := base-dir / 'bin' / name
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
 icon-svg-dst := icons-dst / 'scalable' / 'apps' / icon-svg
+policy-dst := base-dir / 'share' / 'polkit-1' / 'actions' / policy
+polkit-rule-dst := base-dir / 'share' / 'polkit-1' / 'rules.d' / polkit-rule
+helper-dst := base-dir / 'libexec' / name / helper-name
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -66,10 +75,13 @@ install:
     install -Dm0644 {{ 'resources' / desktop }} {{desktop-dst}}
     install -Dm0644 {{ 'resources' / appdata }} {{appdata-dst}}
     install -Dm0644 {{ 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg' }} {{icon-svg-dst}}
+    install -Dm0644 {{ 'resources' / policy }} {{policy-dst}}
+    install -Dm0644 {{ 'resources' / polkit-rule }} {{polkit-rule-dst}}
+    install -Dm0755 {{ 'resources' / helper-name }} {{helper-dst}}
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}}
+    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}} {{policy-dst}} {{polkit-rule-dst}} {{helper-dst}}
 
 # Vendor dependencies locally
 vendor:

@@ -461,6 +461,13 @@ async fn run_with_locale(locale: &str, program: &str, args: &[&str]) -> String {
 /// management page.
 const LOCALE_GEN_PATH: &str = "/etc/locale.gen";
 
+/// Privileged helper invoked via `pkexec` to write `/etc/locale.gen`
+/// and run `locale-gen`. Installed by `just install` from
+/// `resources/apply-locale-gen`. Pkexec resolves this path to our
+/// named polkit action via the `org.freedesktop.policykit.exec.path`
+/// annotation in the shipped `.policy` file.
+const APPLY_LOCALE_GEN_HELPER: &str = "/usr/libexec/cosmic-locale/apply-locale-gen";
+
 /// One row in `/etc/locale.gen` that the user can toggle on or off.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocaleGenEntry {
@@ -643,15 +650,14 @@ pub async fn apply_locale_gen(locale_gen: &LocaleGen) -> Result<(), LocaleError>
         source: Arc::new(err),
     };
 
-    // The shell command is a static string — only the file *contents*
-    // travel via stdin, so there's no injection vector. We use `tee`
-    // to write the file because pkexec's child has elevated rights
-    // and our app does not, so a direct `tokio::fs::write` would be
-    // permission-denied.
+    // pkexec invokes our installed helper, which polkit resolves to
+    // the `dev.rabol.cosmic-locale.apply-locale-gen` action via the
+    // `org.freedesktop.policykit.exec.path` annotation in the shipped
+    // `.policy` file. The helper reads the new file contents from
+    // stdin, writes them atomically to /etc/locale.gen, and runs
+    // `locale-gen` as root.
     let mut child = tokio::process::Command::new("pkexec")
-        .arg("sh")
-        .arg("-c")
-        .arg(format!("tee {LOCALE_GEN_PATH} >/dev/null && locale-gen"))
+        .arg(APPLY_LOCALE_GEN_HELPER)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

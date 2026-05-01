@@ -14,6 +14,16 @@ A [justfile](./justfile) is included by default for the [casey/just][just] comma
 - `just check` runs clippy on the project to check for linter warnings
 - `just check-json` can be used by IDEs that support LSP
 
+### Polkit and the privileged helper
+
+Applying changes from the **Locale management** page (rewriting `/etc/locale.gen` and running `locale-gen`) requires root and runs through `pkexec`. `just install` lays down three files alongside the binary:
+
+- `/usr/share/polkit-1/actions/dev.rabol.cosmic-locale.policy` declares the polkit action `dev.rabol.cosmic-locale.apply-locale-gen` and points it at the helper.
+- `/usr/share/polkit-1/rules.d/dev.rabol.cosmic-locale.rules` grants that action — and `org.freedesktop.locale1.set-locale` used by the per-category picker — to local active members of `wheel` or `sudo` without prompting, mirroring the rule that the cosmic-settings package ships.
+- `/usr/libexec/cosmic-locale/apply-locale-gen` is the small POSIX shell helper that pkexec invokes.
+
+Without these files the app still works, but every privileged action will surface a polkit prompt (or, for `locale-gen`, fail if the helper isn't installed at all). For development, run `sudo just install` once so the **Apply** button on the Locale management page can find the helper.
+
 ## Translators
 
 [Fluent][fluent] is used for localization of the software. Fluent's translation files are found in the [i18n directory](./i18n). New translations may copy the [English (en) localization](./i18n/en) of the project, rename `en` to the desired [ISO 639-1 language code][iso-codes], and then translations can be provided for each [message identifier][fluent-guide]. If no translation is necessary, the message may be omitted.
