@@ -2,7 +2,9 @@
 
 use crate::config::Config;
 use crate::fl;
-use crate::locale::{self, LoadedLocale, LocaleCode, LocaleError, LocalePreview, LocaleSource};
+use crate::locale::{
+    self, LoadedLocale, LocaleCode, LocaleError, LocaleGen, LocalePreview, LocaleSource,
+};
 use crate::pages;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -43,6 +45,29 @@ pub struct AppModel {
     pub(crate) available_locales: Option<Result<Vec<LocaleCode>, LocaleError>>,
     /// State of the per-category picker, if a category is being edited.
     pub(crate) picker: Option<PickerState>,
+    /// Parsed `/etc/locale.gen` plus the user's pending edits.
+    /// `None` while the initial load is in flight.
+    pub(crate) locale_gen: Option<Result<LocaleGenState, LocaleError>>,
+}
+
+/// State for the locale-management page: the freshly-loaded baseline,
+/// the user's currently-edited copy, search text, in-flight flag, and
+/// the most recent apply error.
+#[derive(Debug, Clone)]
+pub struct LocaleGenState {
+    pub initial: LocaleGen,
+    pub current: LocaleGen,
+    pub search: String,
+    pub in_flight: bool,
+    pub last_error: Option<LocaleError>,
+}
+
+impl LocaleGenState {
+    /// Whether the user has changed anything from the loaded baseline.
+    #[must_use]
+    pub fn is_dirty(&self) -> bool {
+        self.initial != self.current
+    }
 }
 
 /// State for the per-category locale picker shown in the context drawer.
@@ -71,6 +96,11 @@ pub enum Message {
     CurrentLocaleLoaded(Result<LoadedLocale, LocaleError>),
     LaunchUrl(String),
     LcOverridesReset(Result<(), LocaleError>),
+    LocaleGenApplied(Result<(), LocaleError>),
+    LocaleGenApply,
+    LocaleGenLoaded(Result<LocaleGen, LocaleError>),
+    LocaleGenSearch(String),
+    LocaleGenToggle(usize),
     OpenCategoryPicker { category: String, current: String },
     PreviewLoaded(LocalePreview),
     ResetLcOverrides,
@@ -159,6 +189,7 @@ impl cosmic::Application for AppModel {
             last_reset_error: None,
             available_locales: None,
             picker: None,
+            locale_gen: None,
         };
 
         let title_command = app.update_title();
@@ -170,10 +201,14 @@ impl cosmic::Application for AppModel {
             Message::AvailableLocalesLoaded(locale::list_installed_locales().await)
         })
         .map(cosmic::Action::App);
+        let load_locale_gen = cosmic::task::future(async {
+            Message::LocaleGenLoaded(locale::read_locale_gen().await)
+        })
+        .map(cosmic::Action::App);
 
         (
             app,
-            Task::batch([title_command, load_locale, load_available]),
+            Task::batch([title_command, load_locale, load_available, load_locale_gen]),
         )
     }
 
@@ -434,6 +469,70 @@ impl cosmic::Application for AppModel {
                         }
                     }
                 }
+            }
+
+            Message::LocaleGenLoaded(result) => {
+                if let Err(why) = &result {
+                    tracing::error!(%why, "failed to read /etc/locale.gen");
+                }
+                self.locale_gen = Some(result.map(|loaded| LocaleGenState {
+                    initial: loaded.clone(),
+                    current: loaded,
+                    search: String::new(),
+                    in_flight: false,
+                    last_error: None,
+                }));
+            }
+
+            Message::LocaleGenSearch(search) => {
+                if let Some(Ok(state)) = self.locale_gen.as_mut() {
+                    state.search = search;
+                }
+            }
+
+            Message::LocaleGenToggle(line_index) => {
+                if let Some(Ok(state)) = self.locale_gen.as_mut() {
+                    state.current.toggle(line_index);
+                    state.last_error = None;
+                }
+            }
+
+            Message::LocaleGenApply => {
+                let Some(Ok(state)) = self.locale_gen.as_mut() else {
+                    return Task::none();
+                };
+                if state.in_flight || !state.is_dirty() {
+                    return Task::none();
+                }
+                state.in_flight = true;
+                state.last_error = None;
+                let to_apply = state.current.clone();
+                return cosmic::task::future(async move {
+                    Message::LocaleGenApplied(locale::apply_locale_gen(&to_apply).await)
+                })
+                .map(cosmic::Action::App);
+            }
+
+            Message::LocaleGenApplied(result) => {
+                if let Some(Ok(state)) = self.locale_gen.as_mut() {
+                    state.in_flight = false;
+                    match result {
+                        Ok(()) => {
+                            state.initial = state.current.clone();
+                        }
+                        Err(err) => {
+                            tracing::error!(%err, "failed to apply /etc/locale.gen");
+                            state.last_error = Some(err);
+                            return Task::none();
+                        }
+                    }
+                }
+                // After a successful apply, refresh the installed list so
+                // the categories picker reflects the newly-generated locales.
+                return cosmic::task::future(async {
+                    Message::AvailableLocalesLoaded(locale::list_installed_locales().await)
+                })
+                .map(cosmic::Action::App);
             }
         }
         Task::none()

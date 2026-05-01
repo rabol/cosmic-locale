@@ -49,6 +49,17 @@ picker-preview-datetime = Date and time
 picker-preview-number = Number
 picker-preview-loading = Computing preview…
 
+# Locale management page
+locale-management-section = Installed locales
+locale-management-search-placeholder = Search locales
+locale-management-empty = No locales match your search.
+locale-management-loading = Loading /etc/locale.gen…
+locale-management-load-failed = Could not read /etc/locale.gen: { $reason }
+locale-management-apply = Apply
+locale-management-applying = Applying…
+locale-management-apply-failed = Could not apply: { $reason }
+locale-management-apply-cancelled = Authentication cancelled or denied.
+
 current-locale-reset = Reset overrides to language
 current-locale-reset-pending = Resetting…
 current-locale-reset-cancelled = Authentication cancelled or denied.

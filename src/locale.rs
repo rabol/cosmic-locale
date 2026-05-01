@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tokio::io::AsyncWriteExt;
 use zbus::Connection;
 use zbus::proxy;
 
@@ -456,6 +457,259 @@ async fn run_with_locale(locale: &str, program: &str, args: &[&str]) -> String {
 ///
 /// Returns [`LocaleError::CommandSpawnFailed`] if `locale` cannot be
 /// launched, or [`LocaleError::CommandFailed`] on a non-zero exit.
+/// Path to the locale-gen configuration file edited by the locale
+/// management page.
+const LOCALE_GEN_PATH: &str = "/etc/locale.gen";
+
+/// One row in `/etc/locale.gen` that the user can toggle on or off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocaleGenEntry {
+    pub code: String,
+    pub charset: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Line {
+    /// A toggleable locale row.
+    Entry(LocaleGenEntry),
+    /// Anything else — header comments, blank lines, unrecognised
+    /// content. Round-tripped verbatim so we don't clobber the file's
+    /// hand-written guidance.
+    Verbatim(String),
+}
+
+/// In-memory representation of `/etc/locale.gen` that preserves
+/// non-locale lines so the file can be rewritten without losing
+/// header comments or formatting.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LocaleGen {
+    lines: Vec<Line>,
+}
+
+impl LocaleGen {
+    /// Iterate all locale entries paired with their line index.
+    pub fn entries(&self) -> impl Iterator<Item = (usize, &LocaleGenEntry)> {
+        self.lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| match line {
+                Line::Entry(e) => Some((i, e)),
+                Line::Verbatim(_) => None,
+            })
+    }
+
+    /// Toggle the entry at the given line index. No-op if the index
+    /// is out of bounds or refers to a verbatim line.
+    pub fn toggle(&mut self, line_index: usize) {
+        if let Some(Line::Entry(entry)) = self.lines.get_mut(line_index) {
+            entry.enabled = !entry.enabled;
+        }
+    }
+}
+
+/// Read and parse `/etc/locale.gen`.
+///
+/// # Errors
+///
+/// Returns [`LocaleError::ReadConfig`] if the file exists but cannot be read.
+/// A missing file results in an empty [`LocaleGen`].
+pub async fn read_locale_gen() -> Result<LocaleGen, LocaleError> {
+    match tokio::fs::read_to_string(LOCALE_GEN_PATH).await {
+        Ok(contents) => Ok(parse_locale_gen(&contents)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(LocaleGen::default()),
+        Err(err) => Err(LocaleError::ReadConfig {
+            path: PathBuf::from(LOCALE_GEN_PATH),
+            source: Arc::new(err),
+        }),
+    }
+}
+
+/// Parse the contents of `/etc/locale.gen`.
+///
+/// Each non-empty, non-pure-comment line is examined as `<code> <charset>`
+/// (with an optional leading `#` marking a disabled entry). Anything that
+/// doesn't fit that shape is preserved verbatim — header comments, blank
+/// lines, and oddly-formatted entries all survive a parse + render round
+/// trip.
+#[must_use]
+pub fn parse_locale_gen(input: &str) -> LocaleGen {
+    let mut lines = Vec::new();
+    for raw in input.lines() {
+        if let Some(entry) = try_parse_locale_gen_entry(raw) {
+            lines.push(Line::Entry(entry));
+        } else {
+            lines.push(Line::Verbatim(raw.to_string()));
+        }
+    }
+    LocaleGen { lines }
+}
+
+/// Render a [`LocaleGen`] back to the on-disk format.
+///
+/// Entry lines normalise to `code charset\n` (or `# code charset\n`
+/// when disabled). Verbatim lines pass through unchanged.
+#[must_use]
+pub fn render_locale_gen(locale_gen: &LocaleGen) -> String {
+    let mut out = String::new();
+    for line in &locale_gen.lines {
+        match line {
+            Line::Entry(e) => {
+                if !e.enabled {
+                    out.push_str("# ");
+                }
+                out.push_str(&e.code);
+                out.push(' ');
+                out.push_str(&e.charset);
+                out.push('\n');
+            }
+            Line::Verbatim(s) => {
+                out.push_str(s);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+fn try_parse_locale_gen_entry(raw: &str) -> Option<LocaleGenEntry> {
+    let trimmed = raw.trim_start();
+
+    // Strip exactly one leading '#' (with optional whitespace) for
+    // commented entries. Lines like `## hello` aren't entries — they
+    // start with `#` but the body after the first `#` still starts
+    // with `#` and won't parse as a code.
+    let (enabled, body) = if let Some(rest) = trimmed.strip_prefix('#') {
+        (false, rest.trim_start())
+    } else {
+        (true, trimmed)
+    };
+
+    let mut parts = body.split_whitespace();
+    let code = parts.next()?;
+    let charset = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    if !looks_like_locale_code(code) || !looks_like_charset(charset) {
+        return None;
+    }
+
+    Some(LocaleGenEntry {
+        code: code.to_string(),
+        charset: charset.to_string(),
+        enabled,
+    })
+}
+
+fn looks_like_locale_code(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    !s.contains(char::is_whitespace)
+}
+
+fn looks_like_charset(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_uppercase() && !s.contains(char::is_whitespace)
+}
+
+/// Apply a [`LocaleGen`] by writing it to `/etc/locale.gen` and then
+/// running `locale-gen`, both via a single privileged `pkexec`
+/// invocation so the user gets exactly one polkit prompt.
+///
+/// # Errors
+///
+/// - [`LocaleError::CommandSpawnFailed`] if `pkexec` cannot be launched.
+/// - [`LocaleError::Cancelled`] if the polkit prompt was dismissed or
+///   authorisation was denied.
+/// - [`LocaleError::CommandFailed`] for any other non-zero exit
+///   (including a `locale-gen` failure).
+pub async fn apply_locale_gen(locale_gen: &LocaleGen) -> Result<(), LocaleError> {
+    use std::process::Stdio;
+
+    let contents = render_locale_gen(locale_gen);
+
+    let spawn_err = |err: std::io::Error| LocaleError::CommandSpawnFailed {
+        command: "pkexec".to_string(),
+        source: Arc::new(err),
+    };
+
+    // The shell command is a static string — only the file *contents*
+    // travel via stdin, so there's no injection vector. We use `tee`
+    // to write the file because pkexec's child has elevated rights
+    // and our app does not, so a direct `tokio::fs::write` would be
+    // permission-denied.
+    let mut child = tokio::process::Command::new("pkexec")
+        .arg("sh")
+        .arg("-c")
+        .arg(format!("tee {LOCALE_GEN_PATH} >/dev/null && locale-gen"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(spawn_err)?;
+
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .expect("pkexec child was spawned with piped stdin");
+        stdin
+            .write_all(contents.as_bytes())
+            .await
+            .map_err(spawn_err)?;
+        stdin.shutdown().await.ok();
+    }
+
+    let output = child.wait_with_output().await.map_err(spawn_err)?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(classify_pkexec_error(
+        &stderr,
+        output.status.code().unwrap_or(-1),
+    ))
+}
+
+/// Map a `pkexec` exit code + stderr into a typed error.
+///
+/// Exit 126 means "user dismissed the auth dialog or wasn't
+/// authorised." Some agents instead surface the cancellation via
+/// stderr text such as "authentication failed" or "dismissed".
+fn classify_pkexec_error(stderr: &str, status: i32) -> LocaleError {
+    let trimmed = stderr.trim();
+
+    if status == 126 {
+        return LocaleError::Cancelled;
+    }
+
+    let lower = trimmed.to_lowercase();
+    if lower.contains("authentication failed")
+        || lower.contains("not authorized")
+        || lower.contains("dismissed")
+    {
+        return LocaleError::Cancelled;
+    }
+
+    LocaleError::CommandFailed {
+        command: "pkexec".to_string(),
+        status,
+        stderr: trimmed.to_string(),
+    }
+}
+
 pub async fn list_installed_locales() -> Result<Vec<LocaleCode>, LocaleError> {
     let output = tokio::process::Command::new("locale")
         .arg("-a")
@@ -807,6 +1061,97 @@ LANG=en_US.UTF-8
             assert_eq!(view.value, "C");
             assert_eq!(view.source, CategorySource::Default);
         }
+    }
+
+    #[test]
+    fn locale_gen_parses_enabled_and_disabled() {
+        let input = "\
+# This file lists locales that you wish to have built.
+en_US.UTF-8 UTF-8
+# en_GB.UTF-8 UTF-8
+de_DE.UTF-8 UTF-8
+";
+        let parsed = parse_locale_gen(input);
+        let entries: Vec<_> = parsed.entries().map(|(_, e)| e).collect();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].code, "en_US.UTF-8");
+        assert!(entries[0].enabled);
+        assert_eq!(entries[1].code, "en_GB.UTF-8");
+        assert!(!entries[1].enabled);
+        assert_eq!(entries[2].code, "de_DE.UTF-8");
+        assert!(entries[2].enabled);
+    }
+
+    #[test]
+    fn locale_gen_round_trips_unchanged_input() {
+        let input = "\
+# Header comment
+en_US.UTF-8 UTF-8
+# en_GB.UTF-8 UTF-8
+
+# Trailing block
+de_DE.UTF-8 UTF-8
+";
+        let parsed = parse_locale_gen(input);
+        let rendered = render_locale_gen(&parsed);
+        assert_eq!(rendered, input);
+    }
+
+    #[test]
+    fn locale_gen_toggle_flips_only_target() {
+        let input = "\
+en_US.UTF-8 UTF-8
+# en_GB.UTF-8 UTF-8
+";
+        let mut parsed = parse_locale_gen(input);
+        let target_index = parsed
+            .entries()
+            .find(|(_, e)| e.code == "en_GB.UTF-8")
+            .map(|(i, _)| i)
+            .unwrap();
+        parsed.toggle(target_index);
+
+        let rendered = render_locale_gen(&parsed);
+        assert_eq!(rendered, "en_US.UTF-8 UTF-8\nen_GB.UTF-8 UTF-8\n");
+    }
+
+    #[test]
+    fn locale_gen_preserves_non_entry_lines_verbatim() {
+        let input = "\
+## A header with double-hash that isn't a locale entry
+   # Indented comment with weirdness
+not a locale line at all
+en_US.UTF-8 UTF-8
+";
+        let parsed = parse_locale_gen(input);
+        let rendered = render_locale_gen(&parsed);
+        assert_eq!(rendered, input);
+        // Only one toggleable entry survived parsing.
+        assert_eq!(parsed.entries().count(), 1);
+    }
+
+    #[test]
+    fn locale_gen_handles_multi_charset_for_same_base() {
+        let input = "\
+# en_US ISO-8859-1
+en_US.UTF-8 UTF-8
+";
+        let parsed = parse_locale_gen(input);
+        let entries: Vec<_> = parsed.entries().map(|(_, e)| e).collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].code, "en_US");
+        assert_eq!(entries[0].charset, "ISO-8859-1");
+        assert!(!entries[0].enabled);
+        assert_eq!(entries[1].code, "en_US.UTF-8");
+        assert!(entries[1].enabled);
+    }
+
+    #[test]
+    fn locale_gen_toggle_out_of_bounds_is_noop() {
+        let mut parsed = parse_locale_gen("en_US.UTF-8 UTF-8\n");
+        parsed.toggle(99);
+        let rendered = render_locale_gen(&parsed);
+        assert_eq!(rendered, "en_US.UTF-8 UTF-8\n");
     }
 
     #[test]
