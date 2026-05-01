@@ -74,10 +74,23 @@ impl LocaleGenState {
     }
 }
 
-/// State for the per-category locale picker shown in the context drawer.
+/// What the locale picker is going to write when the user clicks Apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerTarget {
+    /// Set a single `LC_*` category.
+    Category(String),
+    /// Set the system language: writes `LANG` plus every `LC_*` to
+    /// the chosen value, mirroring cosmic-settings' region picker.
+    SystemLanguage,
+}
+
+/// State for the locale picker shown in the context drawer. The same
+/// drawer/UI is used for changing one `LC_*` category and for the
+/// "Set system language" action; only [`PickerState::target`]
+/// differs.
 #[derive(Debug, Clone)]
 pub struct PickerState {
-    pub category: String,
+    pub target: PickerTarget,
     pub initial_value: String,
     pub selected: String,
     pub search: String,
@@ -105,7 +118,10 @@ pub enum Message {
     LocaleGenLoaded(Result<LocaleGen, LocaleError>),
     LocaleGenSearch(String),
     LocaleGenToggle(usize),
-    OpenCategoryPicker { category: String, current: String },
+    OpenLocalePicker {
+        target: PickerTarget,
+        current: String,
+    },
     PreviewLoaded(LocalePreview),
     ResetLcOverrides,
     SelectPage(Page),
@@ -385,9 +401,9 @@ impl cosmic::Application for AppModel {
                 self.available_locales = Some(result);
             }
 
-            Message::OpenCategoryPicker { category, current } => {
+            Message::OpenLocalePicker { target, current } => {
                 self.picker = Some(PickerState {
-                    category: category.clone(),
+                    target,
                     initial_value: current.clone(),
                     selected: current.clone(),
                     search: String::new(),
@@ -454,11 +470,15 @@ impl cosmic::Application for AppModel {
                 picker.in_flight = true;
                 picker.last_error = None;
 
-                let category = picker.category.clone();
+                let target = picker.target.clone();
                 let value = picker.selected.clone();
 
                 return cosmic::task::future(async move {
-                    Message::CategoryUpdated(locale::set_category(&category, &value).await)
+                    let result = match target {
+                        PickerTarget::Category(name) => locale::set_category(&name, &value).await,
+                        PickerTarget::SystemLanguage => locale::set_system_language(&value).await,
+                    };
+                    Message::CategoryUpdated(result)
                 })
                 .map(cosmic::Action::App);
             }

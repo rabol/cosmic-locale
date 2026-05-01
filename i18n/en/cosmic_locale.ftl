@@ -31,6 +31,7 @@ welcome-summary-source-env = Loaded from the process environment.
 welcome-actions-title = Quick actions
 welcome-action-current = View current locale
 welcome-action-management = Manage installed locales
+welcome-action-language = Set system language
 
 # Placeholder shown on pages whose content has not yet been implemented.
 coming-soon = Coming soon.
@@ -53,6 +54,7 @@ locale-categories-edit = Change locale…
 
 # Category picker (context drawer)
 picker-title = Change { $category }
+picker-system-language-title = Set system language
 picker-search-placeholder = Search locales
 picker-empty = No matching locales.
 picker-loading = Loading installed locales…

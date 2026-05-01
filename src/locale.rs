@@ -382,6 +382,42 @@ pub async fn set_category(category: &str, value: &str) -> Result<(), LocaleError
     Ok(())
 }
 
+/// Set the system language: write `LANG` plus every `LC_*` to the
+/// chosen locale value via systemd-localed.
+///
+/// Mirrors the behaviour of cosmic-settings' region picker, which
+/// always emits all twelve `LC_*` entries alongside `LANG` so the
+/// new language fully takes effect (rather than relying on the
+/// "missing variables stay unchanged" semantics of `SetLocale`,
+/// which would leave existing per-category overrides in place).
+///
+/// # Errors
+///
+/// Same as [`reset_lc_overrides`].
+pub async fn set_system_language(value: &str) -> Result<(), LocaleError> {
+    let conn = Connection::system()
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+    let proxy = Locale1Proxy::new(&conn)
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+
+    let mut new_locale = Vec::with_capacity(LC_CATEGORIES.len() + 1);
+    new_locale.push(format!("LANG={value}"));
+    for category in LC_CATEGORIES {
+        new_locale.push(format!("{category}={value}"));
+    }
+
+    let new_locale_strs: Vec<&str> = new_locale.iter().map(String::as_str).collect();
+
+    proxy
+        .set_locale(&new_locale_strs, true)
+        .await
+        .map_err(|e| zbus_to_locale_error(&e))?;
+
+    Ok(())
+}
+
 /// Replace (or append) a single category in the locale array.
 ///
 /// If `category=` already appears in `current`, its value is replaced;

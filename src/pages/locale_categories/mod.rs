@@ -4,7 +4,7 @@
 //! inheritance from `LANG`. Each row carries an action button that
 //! opens a picker in the context drawer.
 
-use crate::app::{AppModel, Message};
+use crate::app::{AppModel, Message, PickerTarget};
 use crate::fl;
 use crate::locale::{
     self, CategorySource, CategoryView, LoadedLocale, LocaleCode, LocaleError, LocalePreview,
@@ -55,8 +55,8 @@ fn category_row(view: &CategoryView) -> Element<'static, Message> {
     let current_value = view.value.clone();
 
     let edit_button = widget::button::icon(icon::from_name("view-more-symbolic"))
-        .on_press(Message::OpenCategoryPicker {
-            category: category_name.clone(),
+        .on_press(Message::OpenLocalePicker {
+            target: PickerTarget::Category(category_name.clone()),
             current: current_value,
         })
         .tooltip(fl!("locale-categories-edit"));
@@ -91,7 +91,10 @@ pub fn picker_drawer(model: &AppModel) -> context_drawer::ContextDrawer<'_, Mess
 
     let title = model.picker.as_ref().map_or_else(
         || fl!("page-locale-categories"),
-        |p| fl!("picker-title", category = p.category.clone()),
+        |p| match &p.target {
+            PickerTarget::Category(name) => fl!("picker-title", category = name.clone()),
+            PickerTarget::SystemLanguage => fl!("picker-system-language-title"),
+        },
     );
 
     let footer = picker_footer(model);

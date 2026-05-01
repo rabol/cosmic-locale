@@ -4,7 +4,7 @@
 //! a live snapshot of the system's current locale and quick-action
 //! buttons that deep-link to the other nav pages.
 
-use crate::app::{AppModel, Message, Page};
+use crate::app::{AppModel, Message, Page, PickerTarget};
 use crate::fl;
 use crate::locale::{LoadedLocale, LocaleError, LocaleSource};
 use cosmic::iced::Length;
@@ -19,7 +19,7 @@ pub fn view(model: &AppModel) -> Element<'_, Message> {
         .push(widget::text::body(fl!("welcome-body")))
         .push(pages_section())
         .push(summary_section(model))
-        .push(actions_section())
+        .push(actions_section(model))
         .spacing(space_s)
         .height(Length::Fill)
         .into()
@@ -119,7 +119,7 @@ fn summary_error_text(err: &LocaleError) -> String {
     fl!("welcome-summary-error", reason = err.to_string())
 }
 
-fn actions_section() -> Element<'static, Message> {
+fn actions_section(model: &AppModel) -> Element<'_, Message> {
     let space_s = cosmic::theme::spacing().space_s;
 
     let to_current = widget::button::standard(fl!("welcome-action-current"))
@@ -127,10 +127,26 @@ fn actions_section() -> Element<'static, Message> {
     let to_management = widget::button::standard(fl!("welcome-action-management"))
         .on_press(Message::SelectPage(Page::LocaleManagement));
 
+    let lang_value = model
+        .current_locale
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .and_then(|loaded| loaded.settings.lang.as_ref())
+        .map(|c| c.as_str().to_string());
+
+    let mut to_language = widget::button::standard(fl!("welcome-action-language"));
+    if let Some(current) = lang_value {
+        to_language = to_language.on_press(Message::OpenLocalePicker {
+            target: PickerTarget::SystemLanguage,
+            current,
+        });
+    }
+
     widget::column::with_capacity(2)
         .push(widget::text::heading(fl!("welcome-actions-title")))
         .push(
-            widget::row::with_capacity(2)
+            widget::row::with_capacity(3)
+                .push(to_language)
                 .push(to_current)
                 .push(to_management)
                 .spacing(space_s),
