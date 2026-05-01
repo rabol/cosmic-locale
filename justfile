@@ -23,7 +23,7 @@ appdata-dst := base-dir / 'share' / 'appdata' / appdata
 bin-dst := base-dir / 'bin' / name
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
-icon-svg-dst := icons-dst / 'scalable' / 'apps'
+icon-svg-dst := icons-dst / 'scalable' / 'apps' / icon-svg
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -69,7 +69,7 @@ install:
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{icon-svg-dst}}
+    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}}
 
 # Vendor dependencies locally
 vendor:

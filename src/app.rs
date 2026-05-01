@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: GPL-3.0-only
 
 use crate::config::Config;
 use crate::fl;
@@ -58,7 +58,7 @@ impl cosmic::Application for AppModel {
     type Message = Message;
 
     /// Unique identifier in RDNN (reverse domain name notation) format.
-    const APP_ID: &'static str = "dev.mmurphy.Test";
+    const APP_ID: &'static str = "dev.rabol.cosmic-locale";
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -111,10 +111,10 @@ impl cosmic::Application for AppModel {
             config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
                 .map(|context| match Config::get_entry(&context) {
                     Ok(config) => config,
-                    Err((_errors, config)) => {
-                        // for why in errors {
-                        //     tracing::error!(%why, "error loading app config");
-                        // }
+                    Err((errors, config)) => {
+                        for why in errors {
+                            tracing::error!(%why, "error loading app config");
+                        }
 
                         config
                     }
@@ -249,9 +249,9 @@ impl cosmic::Application for AppModel {
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| {
-                    // for why in update.errors {
-                    //     tracing::error!(?why, "app config error");
-                    // }
+                    for why in update.errors {
+                        tracing::error!(?why, "app config error");
+                    }
 
                     Message::UpdateConfig(update.config)
                 }),
@@ -260,16 +260,19 @@ impl cosmic::Application for AppModel {
         // Conditionally enables a timer that emits a message every second.
         if self.watch_is_active {
             subscriptions.push(Subscription::run(|| {
-                cosmic::iced::stream::channel(1, |mut emitter: futures::channel::mpsc::Sender<_>| async move {
-                    let mut time = 1;
-                    let mut interval = tokio::time::interval(Duration::from_secs(1));
+                cosmic::iced::stream::channel(
+                    1,
+                    |mut emitter: futures::channel::mpsc::Sender<_>| async move {
+                        let mut time = 1;
+                        let mut interval = tokio::time::interval(Duration::from_secs(1));
 
-                    loop {
-                        interval.tick().await;
-                        _ = emitter.send(Message::WatchTick(time)).await;
-                        time += 1;
-                    }
-                })
+                        loop {
+                            interval.tick().await;
+                            _ = emitter.send(Message::WatchTick(time)).await;
+                            time += 1;
+                        }
+                    },
+                )
             }));
         }
 
@@ -308,7 +311,7 @@ impl cosmic::Application for AppModel {
             Message::LaunchUrl(url) => match open::that_detached(&url) {
                 Ok(()) => {}
                 Err(err) => {
-                    eprintln!("failed to open {url:?}: {err}");
+                    tracing::error!(%err, %url, "failed to open url");
                 }
             },
         }
