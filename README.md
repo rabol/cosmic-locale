@@ -157,6 +157,22 @@ is disabled.
   app template — the libcosmic nav bar, context drawer, settings
   widgets, and the just-based build flow originated there.
 
+## Disclaimer
+
+The author has made every effort to respect upstream licences and
+to credit the projects this software builds on. If anything
+appears incorrect, missing, or improperly attributed — in this
+README, the source headers, the polkit policy, the helper script,
+or anywhere else — please [open an issue][issues] or email the
+maintainer at <steen@rabol.dev> so it can be corrected.
+
+## License
+
+cosmic-locale is licensed under the [GNU General Public License
+v3.0 only](./LICENSE). The full licence text lives in
+[LICENSE](./LICENSE); each source file carries an SPDX identifier
+matching that licence.
+
 [fluent]: https://projectfluent.org/
 [fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
 [iso-codes]: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
@@ -167,3 +183,4 @@ is disabled.
 [sccache]: https://github.com/mozilla/sccache
 [mx-locale]: https://github.com/MX-Linux/mx-locale
 [cosmic-utils]: https://github.com/cosmic-utils
+[issues]: https://github.com/rabol/cosmic-locale/issues
