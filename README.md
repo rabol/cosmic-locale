@@ -1,36 +1,121 @@
 # Cosmic Locale
 
-An application to manage locale
+A native [libcosmic](https://github.com/pop-os/libcosmic) application
+for managing system language and locale settings on Linux. Inspired
+by [MX-Linux/mx-locale](https://github.com/MX-Linux/mx-locale), it
+exposes the things `localectl` and `locale-gen` do — but with a GUI
+that fits into a COSMIC desktop session and authenticates the same
+way other COSMIC apps do.
 
-## Installation
+## What it does
 
-A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
+Four pages, one per nav entry:
 
-- `just` builds the application with the default `just build-release` recipe
-- `just run` builds and runs the application
-- `just install` installs the project into the system
-- `just vendor` creates a vendored tarball
-- `just build-vendored` compiles with vendored dependencies from that tarball
-- `just check` runs clippy on the project to check for linter warnings
-- `just check-json` can be used by IDEs that support LSP
+- **Welcome** — landing screen with a short description of what
+  the app manages.
+- **Current locale** — shows `LANG`, `LANGUAGE`, the file the
+  values were read from (`/etc/locale.conf` on systemd systems or
+  `/etc/default/locale` on Debian/Ubuntu/Pop!_OS), and any `LC_*`
+  overrides. A "Reset overrides to language" button clears every
+  `LC_*` override by setting them all to the current `LANG` value.
+- **Locale categories** — resolves all twelve POSIX `LC_*`
+  categories and tags each one as **Override**, **Inherited from
+  LANG**, or **Default (C)**. Every row carries a three-dot button
+  that opens a context-drawer picker: search through the system's
+  installed UTF-8 locales (from `locale -a`) and pick a new value
+  for that single category. The picker also shows a live preview
+  panel with today's date, the current time, a long datetime, and
+  a sample formatted number, all rendered using the selected
+  locale.
+- **Locale management** — multi-select editor for
+  `/etc/locale.gen`. Tick a row to enable that locale, untick to
+  disable, click **Apply** to rewrite the file and run
+  `locale-gen` in one privileged step. After a successful apply,
+  the picker on the previous page automatically refreshes to
+  include any newly-generated locales.
+
+All privileged actions go through polkit. With the rules file
+installed (see below) the active wheel/sudo user is auto-granted
+both `org.freedesktop.locale1.set-locale` (used by the per-category
+picker and the reset button) and our own
+`dev.rabol.cosmic-locale.apply-locale-gen` (used by the Locale
+management page). No prompts in the common case.
+
+## Supported platforms
+
+- **OS:** any modern Linux running systemd. Tested on Arch and
+  Pop!_OS.
+- **Locale generation** (the management page) requires
+  `locale-gen` to be installed on `PATH`. That covers Arch,
+  Debian, Ubuntu, and Pop!_OS out of the box; not all distros use
+  this tool — Fedora, for instance, ships pre-generated locales
+  through `glibc-langpack-*` packages and has no `locale-gen`.
+- **Polkit auth** uses the same flow as cosmic-settings, so a
+  working polkit agent for your session is required (cosmic-osd on
+  COSMIC, polkit-gnome on GNOME, polkit-kde on KDE,
+  lxqt-policykit anywhere).
+
+## Getting started
+
+```sh
+just                # build release binary
+sudo just install   # required for full functionality (see below)
+just run            # build and run from target/release
+just check          # clippy
+```
+
+`sudo just install` is **required** before the Locale management
+page's **Apply** button will work — the privileged helper at
+`/usr/libexec/cosmic-locale/apply-locale-gen` is invoked via
+`pkexec`, so it has to actually exist on disk. The other three
+pages work without installing because they go through D-Bus to
+systemd-localed.
+
+The rest of the `just` recipes:
+
+- `just install` — install binary, desktop entry, appstream
+  metadata, icon, polkit policy + rules, and the privileged helper.
+- `just uninstall` — remove everything `just install` placed.
+- `just vendor` — create a vendored dependency tarball.
+- `just build-vendored` — build with the vendored tarball.
+- `just check-json` — clippy with JSON output, useful for IDEs.
 
 ### Polkit and the privileged helper
 
-Applying changes from the **Locale management** page (rewriting `/etc/locale.gen` and running `locale-gen`) requires root and runs through `pkexec`. `just install` lays down three files alongside the binary:
+Applying changes from the **Locale management** page (rewriting
+`/etc/locale.gen` and running `locale-gen`) requires root and runs
+through `pkexec`. `just install` lays down three files alongside
+the binary:
 
-- `/usr/share/polkit-1/actions/dev.rabol.cosmic-locale.policy` declares the polkit action `dev.rabol.cosmic-locale.apply-locale-gen` and points it at the helper.
-- `/usr/share/polkit-1/rules.d/dev.rabol.cosmic-locale.rules` grants that action — and `org.freedesktop.locale1.set-locale` used by the per-category picker — to local active members of `wheel` or `sudo` without prompting, mirroring the rule that the cosmic-settings package ships.
-- `/usr/libexec/cosmic-locale/apply-locale-gen` is the small POSIX shell helper that pkexec invokes.
+- `/usr/share/polkit-1/actions/dev.rabol.cosmic-locale.policy`
+  declares the polkit action
+  `dev.rabol.cosmic-locale.apply-locale-gen` and points it at the
+  helper. Without our `.rules` file the action falls back to the
+  policy default (`auth_admin_keep`), which prompts but caches the
+  auth — better than the old generic "run /bin/sh as root" prompt.
+- `/usr/share/polkit-1/rules.d/dev.rabol.cosmic-locale.rules`
+  grants that action — and `org.freedesktop.locale1.set-locale`
+  used by the per-category picker — to local active members of
+  `wheel` or `sudo` without prompting. This mirrors the rule the
+  cosmic-settings package ships, so cosmic-locale behaves the same
+  way on systems where cosmic-settings isn't installed.
+- `/usr/libexec/cosmic-locale/apply-locale-gen` is a small POSIX
+  shell helper. It reads the new `/etc/locale.gen` from stdin,
+  writes it atomically via `mktemp` + `mv`, then execs
+  `locale-gen`.
 
-Without these files the app still works, but every privileged action will surface a polkit prompt (or, for `locale-gen`, fail if the helper isn't installed at all). For development, run `sudo just install` once so the **Apply** button on the Locale management page can find the helper.
-
-## Translators
-
-[Fluent][fluent] is used for localization of the software. Fluent's translation files are found in the [i18n directory](./i18n). New translations may copy the [English (en) localization](./i18n/en) of the project, rename `en` to the desired [ISO 639-1 language code][iso-codes], and then translations can be provided for each [message identifier][fluent-guide]. If no translation is necessary, the message may be omitted.
+Without these files the app still works, but every privileged
+action will surface a polkit prompt — or, for `locale-gen`,
+outright fail if the helper isn't installed at all. For
+development, run `sudo just install` once so the **Apply** button
+on the Locale management page can find the helper.
 
 ## Packaging
 
-If packaging for a Linux distribution, vendor dependencies locally with the `vendor` rule, and build with the vendored sources using the `build-vendored` rule. When installing files, use the `rootdir` and `prefix` variables to change installation paths.
+If packaging for a Linux distribution, vendor dependencies locally
+with the `vendor` rule, and build with the vendored sources using
+the `build-vendored` rule. When installing files, use the
+`rootdir` and `prefix` variables to change installation paths.
 
 ```sh
 just vendor
@@ -38,11 +123,28 @@ just build-vendored
 just rootdir=debian/cosmic-locale prefix=/usr install
 ```
 
-It is recommended to build a source tarball with the vendored dependencies, which can typically be done by running `just vendor` on the host system before it enters the build environment.
+It is recommended to build a source tarball with the vendored
+dependencies, which can typically be done by running `just vendor`
+on the host system before it enters the build environment.
+
+## Translators
+
+[Fluent][fluent] is used for localization. Fluent's translation
+files live in the [i18n directory](./i18n). To add a new
+translation, copy the [English (en) localization](./i18n/en) of
+the project, rename `en` to the desired [ISO 639-1 language
+code][iso-codes], and translate each [message
+identifier][fluent-guide]. If a string doesn't need translating in
+your language, omit it — the loader falls back to English.
 
 ## Developers
 
-Developers should install [rustup][rustup] and configure their editor to use [rust-analyzer][rust-analyzer]. To improve compilation times, disable LTO in the release profile, install the [mold][mold] linker, and configure [sccache][sccache] for use with Rust. The [mold][mold] linker will only improve link times if LTO is disabled.
+Developers should install [rustup][rustup] and configure their
+editor to use [rust-analyzer][rust-analyzer]. To improve
+compilation times, disable LTO in the release profile, install the
+[mold][mold] linker, and configure [sccache][sccache] for use with
+Rust. The [mold][mold] linker will only improve link times if LTO
+is disabled.
 
 [fluent]: https://projectfluent.org/
 [fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
